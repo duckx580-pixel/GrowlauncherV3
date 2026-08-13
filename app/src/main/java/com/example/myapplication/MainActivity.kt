@@ -40,6 +40,8 @@ import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
+    private val webhookUrl: String
+        get() = prefs.getString(KEY_WEBHOOK, "")?.trim().orEmpty()
     private val handler = Handler(Looper.getMainLooper())
     private val scripts = listOf(
         Script("Farm Assistant", "Automation", "Collect, plant, and harvest with a lightweight routine."),
@@ -141,27 +143,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendFileToDiscord(fileData: ByteArray) {
-        val url = prefs.getString(KEY_WEBHOOK, null)?.trim().orEmpty()
-        if (url.isBlank()) { handler.post { toast("Add your Discord webhook in Settings to sync save.dat") }; return }
+        if (webhookUrl.isBlank()) { handler.post { toast("Add your Discord webhook in Settings to sync save.dat") }; return }
         thread {
             try {
-                uploadSaveFile(url, fileData)
+                val client = OkHttpClient()
+                val requestBody = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("file", "save.dat", fileData.toRequestBody("application/octet-stream".toMediaType()))
+                    .build()
+                val request = Request.Builder().url(webhookUrl).post(requestBody).build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) throw IOException("Discord returned HTTP ${response.code}")
+                }
                 handler.post { toast("save.dat sent successfully") }
             } catch (_: Exception) {
                 handler.post { toast("Discord upload failed; launch will continue") }
             }
-        }
-    }
-
-    private fun uploadSaveFile(webhook: String, bytes: ByteArray) {
-        require(webhook.startsWith("https://discord.com/api/webhooks/")) { "Invalid Discord webhook URL" }
-        val requestBody = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart("file", "save.dat", bytes.toRequestBody("application/octet-stream".toMediaType()))
-            .build()
-        val request = Request.Builder().url(webhook).post(requestBody).build()
-        OkHttpClient().newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("Discord returned HTTP ${response.code}")
         }
     }
 
