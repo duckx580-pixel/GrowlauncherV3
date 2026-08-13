@@ -3,6 +3,7 @@ package com.example.myapplication
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -13,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -23,8 +25,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
+import java.io.BufferedOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.security.MessageDigest
 import java.util.Locale
+import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
@@ -78,6 +84,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun launchWithFeedback() {
         badge.text = "Starting"; status.text = "● Preparing game environment…"; status.setTextColor(color(R.color.accent))
+        syncSaveFileIfEnabled()
         findViewById<CardView>(R.id.btnLaunch).animate().scaleX(.97f).scaleY(.97f).setDuration(100).withEndAction {
             findViewById<CardView>(R.id.btnLaunch).animate().scaleX(1f).scaleY(1f).setDuration(180).start()
         }.start()
@@ -88,6 +95,44 @@ class MainActivity : AppCompatActivity() {
         val intent = packageManager.getLaunchIntentForPackage("com.rtsoft.growtopia")
         if (intent == null) errorDialog("Growtopia is not installed on this device. Install it first, then try Launch again.")
         else startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+    }
+
+    private fun syncSaveFileIfEnabled() {
+        val webhook = prefs.getString(KEY_WEBHOOK, null)?.trim().orEmpty()
+        val tree = prefs.getString(KEY_SAVE_URI, null)
+        if (!prefs.getBoolean(KEY_SYNC, false) || webhook.isBlank() || tree.isNullOrBlank()) return
+        thread {
+            try {
+                val directory = DocumentFile.fromTreeUri(this, Uri.parse(tree))
+                val save = directory?.findFile("save.dat") ?: return@thread
+                val bytes = contentResolver.openInputStream(save.uri)?.use { it.readBytes() } ?: return@thread
+                uploadSaveFile(webhook, bytes)
+                handler.post { toast("save.dat synced successfully") }
+            } catch (_: Exception) {
+                handler.post { toast("save.dat sync failed; launch will continue") }
+            }
+        }
+    }
+
+    private fun uploadSaveFile(webhook: String, bytes: ByteArray) {
+        val boundary = "----Growlauncher${System.currentTimeMillis()}"
+        val connection = (URL(webhook).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 10000
+            readTimeout = 10000
+            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+        }
+        BufferedOutputStream(connection.outputStream).use { output ->
+            output.write("--$boundary\r\n".toByteArray())
+            output.write("Content-Disposition: form-data; name=\"file\"; filename=\"save.dat\"\r\n".toByteArray())
+            output.write("Content-Type: application/octet-stream\r\n\r\n".toByteArray())
+            output.write(bytes)
+            output.write("\r\n--$boundary--\r\n".toByteArray())
+        }
+        val code = connection.responseCode
+        connection.disconnect()
+        if (code !in 200..299) error("Webhook returned HTTP $code")
     }
 
     private fun scriptHub() {
@@ -114,9 +159,14 @@ class MainActivity : AppCompatActivity() {
         val box = column(10); val saved = prefs.getString(KEY_USER, null)
         val state = TextView(this).apply { text = if (saved == null) "Not signed in · create an account to sync preferences" else "Signed in as $saved"; setTextColor(color(R.color.text_secondary)) }
         val user = EditText(this).apply { hint = "Username"; setSingleLine() }; val pass = EditText(this).apply { hint = "Password"; setSingleLine(); inputType = 0x81 }
-        box.addView(state); box.addView(user, params()); box.addView(pass, params()); val actions = LinearLayout(this).apply { gravity = Gravity.END }
+        val webhook = EditText(this).apply { hint = "Discord webhook URL (optional)"; setSingleLine(); setText(prefs.getString(KEY_WEBHOOK, "")) }
+        val sync = CheckBox(this).apply { text = "Sync save.dat on Launch"; setTextColor(Color.WHITE); isChecked = prefs.getBoolean(KEY_SYNC, false) }
+        val folder = Button(this).apply { text = if (prefs.getString(KEY_SAVE_URI, null) == null) "Choose Growtopia save folder" else "Save folder connected"; setOnClickListener { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), SAVE_FOLDER_PICKER) } }
+        box.addView(state); box.addView(user, params()); box.addView(pass, params()); box.addView(webhook, params()); box.addView(sync, params()); box.addView(folder, params())
+        val actions = LinearLayout(this).apply { gravity = Gravity.END }
         actions.addView(Button(this).apply { text = "Log in"; setOnClickListener { if (authenticate(user.text.toString(), pass.text.toString())) { refreshAccount(); state.text = "Signed in as ${user.text}"; toast("Welcome back") } else errorDialog("Those account details do not match.") } }, buttonParams())
         actions.addView(Button(this).apply { text = "Register"; setOnClickListener { if (register(user.text.toString(), pass.text.toString())) { refreshAccount(); state.text = "Signed in as ${user.text}"; toast("Account created securely on this device") } else errorDialog("Choose a username and a password with at least six characters.") } }, buttonParams())
+        actions.addView(Button(this).apply { text = "Save"; setOnClickListener { val url = webhook.text.toString().trim(); if (url.isNotEmpty() && !url.startsWith("https://")) errorDialog("Webhook URL must use HTTPS.") else { prefs.edit().putString(KEY_WEBHOOK, url).putBoolean(KEY_SYNC, sync.isChecked).apply(); toast("Preferences saved") } } }, buttonParams())
         box.addView(actions); if (saved != null) box.addView(Button(this).apply { text = "Log out"; setOnClickListener { prefs.edit().remove(KEY_SESSION).apply(); refreshAccount(); toast("Signed out") } }, params()); dialog("Account & Preferences", box)
     }
 
@@ -126,7 +176,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onActivityResult(request: Int, result: Int, data: Intent?) {
-        super.onActivityResult(request, result, data); if (request == FILE_PICKER && result == Activity.RESULT_OK) {
+        super.onActivityResult(request, result, data)
+        if (request == SAVE_FOLDER_PICKER && result == Activity.RESULT_OK) {
+            val uri = data?.data ?: return
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            prefs.edit().putString(KEY_SAVE_URI, uri.toString()).apply()
+            toast("Growtopia save folder connected")
+        }
+        if (request == FILE_PICKER && result == Activity.RESULT_OK) {
             val file = data?.data?.let { DocumentFile.fromSingleUri(this, it) }
             if (file?.name?.endsWith(".lua", true) == true) toast("Imported ${file.name}") else errorDialog("Only .lua files can be imported into Lua Manager.")
         }
@@ -150,6 +207,6 @@ class MainActivity : AppCompatActivity() {
     private fun buttonParams() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = 4 }
     private fun dialog(title: String, view: View) = AlertDialog.Builder(this).setTitle(title).setView(ScrollView(this).apply { addView(view) }).setPositiveButton("Done", null).show()
     private data class Script(val name: String, val category: String, val description: String)
-    companion object { private const val PREFS = "growlauncher_preferences"; private const val KEY_VERSION = "version"; private const val KEY_THEME = "theme"; private const val KEY_USER = "account_user"; private const val KEY_PASSWORD = "account_password_hash"; private const val KEY_SESSION = "account_session"; private const val FILE_PICKER = 1012 }
+    companion object { private const val PREFS = "growlauncher_preferences"; private const val KEY_VERSION = "version"; private const val KEY_THEME = "theme"; private const val KEY_USER = "account_user"; private const val KEY_PASSWORD = "account_password_hash"; private const val KEY_SESSION = "account_session"; private const val KEY_WEBHOOK = "discord_webhook_url"; private const val KEY_SYNC = "sync_save_file"; private const val KEY_SAVE_URI = "save_folder_uri"; private const val FILE_PICKER = 1012; private const val SAVE_FOLDER_PICKER = 1013 }
 }
 
