@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.DocumentsContract
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
@@ -124,8 +125,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openDirectoryPicker() {
+        val growtopiaFolder = Uri.parse(
+            "content://com.android.externalstorage.documents/document/primary%3AAndroid%2Fdata%2Fcom.rtsoft.growtopia%2Ffiles"
+        )
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            putExtra("android.provider.extra.INITIAL_URI", Uri.parse("content://com.android.externalstorage.documents/document/primary%3AAndroid%2Fdata%2Fcom.rtsoft.growtopia%2Ffiles"))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                putExtra(DocumentsContract.EXTRA_INITIAL_URI, growtopiaFolder)
+            } else {
+                putExtra("android.provider.extra.INITIAL_URI", growtopiaFolder)
+            }
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         startActivityForResult(intent, SAVE_FOLDER_PICKER)
     }
