@@ -237,19 +237,43 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resolveSaveFileUris(selectedUri: Uri): List<Uri> {
-        val authority = selectedUri.authority ?: return emptyList()
-        val parentDocumentId = if (DocumentsContract.isTreeUri(selectedUri)) {
-            DocumentsContract.getTreeDocumentId(selectedUri)
+        val treeUri = if (DocumentsContract.isTreeUri(selectedUri)) {
+            selectedUri
         } else {
-            DocumentsContract.getDocumentId(selectedUri)
+            DocumentsContract.buildTreeDocumentUri(
+                selectedUri.authority ?: return emptyList(),
+                DocumentsContract.getDocumentId(selectedUri)
+            )
         }
+        val authority = treeUri.authority ?: return emptyList()
+        val result = linkedSetOf<Uri>()
+        val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        contentResolver.query(
+            DocumentsContract.buildChildDocumentsUriUsingTree(
+                treeUri,
+                DocumentsContract.getTreeDocumentId(treeUri)
+            ),
+            projection,
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            val idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            while (cursor.moveToNext()) {
+                if (idColumn >= 0 && nameColumn >= 0 && cursor.getString(nameColumn).equals("save.dat", ignoreCase = true)) {
+                    val childId = cursor.getString(idColumn)
+                    result += DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+                    result += DocumentsContract.buildDocumentUri(authority, childId)
+                }
+            }
+        }
+
+        val parentDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
         val childDocumentId = "$parentDocumentId/save.dat"
-        val documentUri = DocumentsContract.buildDocumentUri(authority, childDocumentId)
-        val treeDocumentUri = DocumentsContract.buildTreeDocumentUri(authority, parentDocumentId)
-        return listOf(
-            documentUri,
-            DocumentsContract.buildDocumentUriUsingTree(treeDocumentUri, childDocumentId)
-        ).distinct()
+        result += DocumentsContract.buildDocumentUri(authority, childDocumentId)
+        result += DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocumentId)
+        return result.toList()
     }
 
     private fun sendFileToDiscord(fileData: ByteArray) {
