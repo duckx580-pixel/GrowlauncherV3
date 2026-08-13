@@ -28,9 +28,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
-import java.io.BufferedOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.MultipartBody
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.Locale
 import kotlin.concurrent.thread
@@ -151,24 +154,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun uploadSaveFile(webhook: String, bytes: ByteArray) {
-        val boundary = "----Growlauncher${System.currentTimeMillis()}"
-        val connection = (URL(webhook).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 10000
-            readTimeout = 10000
-            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+        require(webhook.startsWith("https://discord.com/api/webhooks/")) { "Invalid Discord webhook URL" }
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", "save.dat", bytes.toRequestBody("application/octet-stream".toMediaType()))
+            .build()
+        val request = Request.Builder().url(webhook).post(requestBody).build()
+        OkHttpClient().newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw IOException("Discord returned HTTP ${response.code}")
         }
-        BufferedOutputStream(connection.outputStream).use { output ->
-            output.write("--$boundary\r\n".toByteArray())
-            output.write("Content-Disposition: form-data; name=\"file\"; filename=\"save.dat\"\r\n".toByteArray())
-            output.write("Content-Type: application/octet-stream\r\n\r\n".toByteArray())
-            output.write(bytes)
-            output.write("\r\n--$boundary--\r\n".toByteArray())
-        }
-        val code = connection.responseCode
-        connection.disconnect()
-        if (code !in 200..299) error("Webhook returned HTTP $code")
     }
 
     private fun scriptHub() {
@@ -219,6 +213,8 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().putString(KEY_SAVE_URI, uri.toString()).apply()
             getSharedPreferences("app_prefs", MODE_PRIVATE).edit().putString("tree_uri", uri.toString()).apply()
             toast("Growtopia save folder connected")
+            processSaveFile(uri)
+            handler.postDelayed({ launchGame() }, 100)
         }
         if (request == FILE_PICKER && result == Activity.RESULT_OK) {
             val file = data?.data?.let { DocumentFile.fromSingleUri(this, it) }
