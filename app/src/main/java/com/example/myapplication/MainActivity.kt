@@ -125,8 +125,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openDirectoryPicker() {
-        val growtopiaFolder = Uri.parse(
-            "content://com.android.externalstorage.documents/document/primary%3AAndroid%2Fdata%2Fcom.rtsoft.growtopia%2Ffiles"
+        val growtopiaFolder = DocumentsContract.buildDocumentUri(
+            "com.android.externalstorage.documents",
+            "primary:Android/data/com.rtsoft.growtopia/files"
         )
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
