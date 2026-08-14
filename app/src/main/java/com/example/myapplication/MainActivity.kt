@@ -22,6 +22,7 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Button
 import android.widget.CheckBox
@@ -317,10 +318,7 @@ class MainActivity : AppCompatActivity() {
         val openSettings = dialog.findViewById<Button>(R.id.wirelessOpenSettings)
         val dismiss = dialog.findViewById<Button>(R.id.wirelessDismiss)
 
-        openSettings.setOnClickListener {
-            runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
-                .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
-        }
+        openSettings.setOnClickListener { openWirelessDebuggingSettings() }
         dismiss.setOnClickListener { dialog.dismiss() }
         dialog.setOnDismissListener {
             if (pairingCodeDialog == null) stopPairingDiscovery()
@@ -330,6 +328,11 @@ class MainActivity : AppCompatActivity() {
         registerRainbowText(dialog.findViewById(android.R.id.content))
         dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         startPairingDiscovery()
+    }
+
+    private fun openWirelessDebuggingSettings() {
+        runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
+            .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
     }
 
     private fun startPairingDiscovery() {
@@ -342,23 +345,21 @@ class MainActivity : AppCompatActivity() {
                 if (pairingEndpoint == null) {
                     pairingEndpoint = endpoint
                     pairingVerificationPending = true
-                    handler.post {
-                        toast("Pairing service found. Enter the six-digit code shown by Android.")
-                        showPendingPairingVerification()
-                    }
+                    handler.post { showPendingPairingVerification() }
                 }
             }
         }
     }
 
     private fun showPendingPairingVerification() {
-        if (!activityVisible || !pairingVerificationPending || pairingCodeDialog != null) return
+        val canOverlay = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+        if ((!activityVisible && !canOverlay) || !pairingVerificationPending || pairingCodeDialog != null) return
         val endpoint = pairingEndpoint ?: return
         pairingVerificationPending = false
-        showPairingCodeDialog(endpoint)
+        showPairingCodeDialog(endpoint, useOverlay = !activityVisible && canOverlay)
     }
 
-    private fun showPairingCodeDialog(endpoint: MdnsEndpoint) {
+    private fun showPairingCodeDialog(endpoint: MdnsEndpoint, useOverlay: Boolean = false) {
         if (pairingCodeDialog != null) return
         val code = EditText(this).apply {
             hint = "Six-digit Wi-Fi pairing code"
@@ -370,7 +371,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Enter Wi-Fi pairing code")
             .setView(code)
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Pair", null)
+            .setPositiveButton("Submit", null)
             .create()
         pairingCodeDialog = prompt
         prompt.setOnDismissListener {
@@ -408,6 +409,9 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
+        }
+        if (useOverlay) {
+            prompt.window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
         }
         prompt.show()
         registerRainbowText(prompt.window?.decorView ?: code)
