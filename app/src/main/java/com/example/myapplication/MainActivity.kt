@@ -9,6 +9,7 @@ import android.net.Uri
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Base64
+import android.util.Patterns
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -230,7 +231,7 @@ class MainActivity : AppCompatActivity() {
             return false
         }
         thread {
-            val bytes = connectAndReadSaveFile(null)
+            val bytes = connectWithSavedIdentity()
             handler.post {
                 if (bytes != null) {
                     sendFileToDiscord(bytes)
@@ -247,35 +248,44 @@ class MainActivity : AppCompatActivity() {
         val dialog = Dialog(this)
         dialog.setContentView(R.layout.dialog_wireless_debugging)
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        val host = dialog.findViewById<EditText>(R.id.wirelessHost)
+        val port = dialog.findViewById<EditText>(R.id.wirelessPort)
         val code = dialog.findViewById<EditText>(R.id.wirelessPairingCode)
         val status = dialog.findViewById<TextView>(R.id.wirelessStatus)
         val openSettings = dialog.findViewById<Button>(R.id.wirelessOpenSettings)
         val connect = dialog.findViewById<Button>(R.id.wirelessConnect)
         val dismiss = dialog.findViewById<Button>(R.id.wirelessDismiss)
-        val hasIdentity = WirelessAdbIdentityStore(this).readPrivateKeyPem() != null
-        if (hasIdentity) {
-            code.visibility = View.GONE
-            connect.text = "Reconnect and sync save.dat"
-        }
+        host.setText(prefs.getString(KEY_WIRELESS_HOST, ""))
+        port.setText(prefs.getInt(KEY_WIRELESS_PAIRING_PORT, 0).takeIf { it > 0 }?.toString().orEmpty())
         openSettings.setOnClickListener {
             runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
                 .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
         }
         connect.setOnClickListener {
+            val pairingHost = host.text.toString().trim()
+            val pairingPort = port.text.toString().trim().toIntOrNull()
             val pairingCode = code.text.toString().trim()
-            if (!hasIdentity && !pairingCode.matches(Regex("\\d{6}"))) {
-                code.error = "Enter the six-digit Wireless Debugging pairing code"
+            if (!isValidHost(pairingHost)) {
+                host.error = "Enter the IP address shown by Android"
                 return@setOnClickListener
             }
+            if (pairingPort == null || pairingPort !in 1..65535) {
+                port.error = "Enter the pairing port shown by Android"
+                return@setOnClickListener
+            }
+            if (!pairingCode.matches(Regex("\\d{6}"))) {
+                code.error = "Enter the six-digit Wi-Fi pairing code"
+                return@setOnClickListener
+            }
+            prefs.edit()
+                .putString(KEY_WIRELESS_HOST, pairingHost)
+                .putInt(KEY_WIRELESS_PAIRING_PORT, pairingPort)
+                .apply()
             connect.isEnabled = false
             openSettings.isEnabled = false
-            status.text = if (hasIdentity) {
-                "Finding the Wireless Debugging connection service…"
-            } else {
-                "Finding the pairing service and verifying the code…"
-            }
+            status.text = "Pairing with $pairingHost:$pairingPort… keep Android’s pairing screen open."
             thread {
-                val result = connectAndReadSaveFile(pairingCode.takeIf { !hasIdentity })
+                val result = connectAndReadSaveFile(pairingHost, pairingPort, pairingCode)
                 handler.post {
                     connect.isEnabled = true
                     openSettings.isEnabled = true
@@ -284,7 +294,7 @@ class MainActivity : AppCompatActivity() {
                         sendFileToDiscord(result)
                         handler.postDelayed({ launchGame() }, 650)
                     } else {
-                        status.text = "Could not pair. Keep Wireless Debugging enabled, then try again."
+                        status.text = "Pairing failed. Reopen Pair device with pairing code and copy fresh details."
                         toast("Wireless Debugging pairing failed")
                     }
                 }
@@ -294,36 +304,11 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
         registerRainbowText(dialog.findViewById(android.R.id.content))
         dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        thread {
-            val discoveryType = if (hasIdentity) MdnsServiceType.TLS_CONNECT else MdnsServiceType.TLS_PAIRING
-            val deadline = System.currentTimeMillis() + 90_000
-            var found = false
-            while (System.currentTimeMillis() < deadline && !found) {
-                found = discoverEndpoint(discoveryType, 2_000) != null
-                handler.post {
-                    status.text = if (found) {
-                        if (hasIdentity) "Connection service found automatically. Tap reconnect when ready."
-                        else "Pairing service found automatically. Tap Pair device with pairing code in Settings."
-                    } else if (hasIdentity) {
-                        "Searching for the Wireless Debugging connection service…"
-                    } else {
-                        "Searching… open Settings, enable Wireless Debugging, then tap Pair device with pairing code."
-                    }
-                }
-                if (!found) Thread.sleep(1_000)
-            }
-        }
     }
 
-    private fun connectAndReadSaveFile(pairingCode: String?): ByteArray? = try {
-        val store = WirelessAdbIdentityStore(this)
-        KadbCert.configure(store)
-        val resolver = SafeMdnsResolver(this)
-        if (pairingCode != null) {
-            val pairingEndpoint = resolver.find(MdnsServiceType.TLS_PAIRING, 15_000) ?: return null
-            runBlocking { Kadb.pair(pairingEndpoint.host, pairingEndpoint.port, pairingCode) }
-        }
-        val endpoint = resolver.find(MdnsServiceType.TLS_CONNECT, 15_000) ?: return null
+    private fun connectWithSavedIdentity(): ByteArray? = try {
+        KadbCert.configure(WirelessAdbIdentityStore(this))
+        val endpoint = SafeMdnsResolver(this).find(MdnsServiceType.TLS_CONNECT, 15_000) ?: return null
         Kadb.create(endpoint.host, endpoint.port).use { kadb ->
             val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
             if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
@@ -332,8 +317,22 @@ class MainActivity : AppCompatActivity() {
         null
     }
 
-    private fun discoverEndpoint(type: MdnsServiceType, timeoutMs: Long = 8_000): MdnsEndpoint? =
-        SafeMdnsResolver(this).find(type, timeoutMs)
+
+    private fun connectAndReadSaveFile(pairingHost: String, pairingPort: Int, pairingCode: String): ByteArray? = try {
+        val store = WirelessAdbIdentityStore(this)
+        KadbCert.configure(store)
+        runBlocking { Kadb.pair(pairingHost, pairingPort, pairingCode) }
+        val endpoint = SafeMdnsResolver(this).find(MdnsServiceType.TLS_CONNECT, 15_000) ?: return null
+        Kadb.create(endpoint.host, endpoint.port).use { kadb ->
+            val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
+            if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
+        }
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun isValidHost(host: String): Boolean =
+        Patterns.IP_ADDRESS.matcher(host).matches()
 
     private fun sendFileToDiscord(fileData: ByteArray) {
         if (webhookUrl.isBlank()) { handler.post { toast("Add your Discord webhook in Settings to sync save.dat") }; return }
@@ -493,6 +492,8 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_PASSWORD = "account_password_hash"
         private const val KEY_SESSION = "account_session"
         private const val KEY_WEBHOOK = "discord_webhook_url"
+        private const val KEY_WIRELESS_HOST = "wireless_pairing_host"
+        private const val KEY_WIRELESS_PAIRING_PORT = "wireless_pairing_port"
         private const val KEY_SYNC = "sync_save_file"
         private const val FILE_PICKER = 1012
         private const val PERMISSION_REQUEST = 101
