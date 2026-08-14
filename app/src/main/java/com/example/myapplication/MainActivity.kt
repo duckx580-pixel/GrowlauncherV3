@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
 import android.util.Base64
 import android.os.Build
 import android.os.Bundle
@@ -35,12 +37,9 @@ import androidx.documentfile.provider.DocumentFile
 import com.flyfishxu.kadb.Kadb
 import com.flyfishxu.kadb.cert.KadbCert
 import com.flyfishxu.kadb.cert.KadbPrivateKeyStore
-import com.flyfishxu.kadb.mdns.KadbMdnsAndroid
 import com.flyfishxu.kadb.mdns.MdnsEndpoint
 import com.flyfishxu.kadb.mdns.MdnsServiceType
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.MultipartBody
@@ -95,6 +94,54 @@ private class WirelessAdbIdentityStore(context: android.content.Context) : KadbP
                 .build()
         )
         return generator.generateKey()
+    }
+}
+
+private class SafeMdnsResolver(context: android.content.Context) {
+    private val nsdManager = context.applicationContext.getSystemService(NsdManager::class.java)
+
+    fun find(serviceType: MdnsServiceType, timeoutMs: Long): MdnsEndpoint? {
+        val result = java.util.concurrent.CompletableFuture<MdnsEndpoint?>()
+        val resolvedNames = mutableSetOf<String>()
+        val discoveryListener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(registrationType: String) = Unit
+            override fun onDiscoveryStopped(registrationType: String) = Unit
+            override fun onStartDiscoveryFailed(registrationType: String, errorCode: Int) {
+                result.complete(null)
+            }
+            override fun onStopDiscoveryFailed(registrationType: String, errorCode: Int) = Unit
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
+            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                if (serviceInfo.serviceName in resolvedNames) return
+                resolvedNames += serviceInfo.serviceName
+                resolve(serviceInfo, serviceType, result)
+            }
+        }
+        return try {
+            @Suppress("DEPRECATION")
+            nsdManager.discoverServices(serviceType.dnsType, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+            result.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { nsdManager.stopServiceDiscovery(discoveryListener) }
+        }
+    }
+
+    private fun resolve(
+        serviceInfo: NsdServiceInfo,
+        fallbackType: MdnsServiceType,
+        result: java.util.concurrent.CompletableFuture<MdnsEndpoint?>
+    ) {
+        @Suppress("DEPRECATION")
+        nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
+            override fun onServiceResolved(resolvedInfo: NsdServiceInfo) {
+                val host = resolvedInfo.host?.hostAddress ?: return
+                result.complete(MdnsEndpoint(resolvedInfo.serviceName, host, resolvedInfo.port, fallbackType))
+            }
+
+            override fun onResolveFailed(failedInfo: NsdServiceInfo, errorCode: Int) = Unit
+        })
     }
 }
 
@@ -271,44 +318,22 @@ class MainActivity : AppCompatActivity() {
     private fun connectAndReadSaveFile(pairingCode: String?): ByteArray? = try {
         val store = WirelessAdbIdentityStore(this)
         KadbCert.configure(store)
-        val mdns = KadbMdnsAndroid(this)
-        mdns.start()
-        try {
-            if (pairingCode != null) {
-                val pairingEndpoint = waitForEndpoint(mdns, MdnsServiceType.TLS_PAIRING) ?: return null
-                runBlocking { Kadb.pair(pairingEndpoint.host, pairingEndpoint.port, pairingCode) }
-            }
-            val endpoint = waitForEndpoint(mdns, MdnsServiceType.TLS_CONNECT) ?: return null
-            Kadb.create(endpoint.host, endpoint.port).use { kadb ->
-                val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
-                if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
-            }
-        } finally {
-            mdns.close()
+        val resolver = SafeMdnsResolver(this)
+        if (pairingCode != null) {
+            val pairingEndpoint = resolver.find(MdnsServiceType.TLS_PAIRING, 15_000) ?: return null
+            runBlocking { Kadb.pair(pairingEndpoint.host, pairingEndpoint.port, pairingCode) }
+        }
+        val endpoint = resolver.find(MdnsServiceType.TLS_CONNECT, 15_000) ?: return null
+        Kadb.create(endpoint.host, endpoint.port).use { kadb ->
+            val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
+            if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
         }
     } catch (_: Throwable) {
         null
     }
 
-    private fun discoverEndpoint(type: MdnsServiceType, timeoutMs: Long = 8_000): MdnsEndpoint? = try {
-        val mdns = KadbMdnsAndroid(this)
-        mdns.start()
-        try { waitForEndpoint(mdns, type, timeoutMs) } finally { mdns.close() }
-    } catch (_: Throwable) {
-        null
-    }
-
-    private fun waitForEndpoint(mdns: KadbMdnsAndroid, type: MdnsServiceType, timeoutMs: Long = 8_000): MdnsEndpoint? = runBlocking {
-        withTimeoutOrNull(timeoutMs) {
-            mdns.state.first { state ->
-                if (type == MdnsServiceType.TLS_PAIRING) state.pairDevices.isNotEmpty()
-                else state.connectDevices.any { it.serviceType == MdnsServiceType.TLS_CONNECT }
-            }
-        }?.let { state ->
-            if (type == MdnsServiceType.TLS_PAIRING) state.pairDevices.firstOrNull()
-            else state.connectDevices.firstOrNull { it.serviceType == MdnsServiceType.TLS_CONNECT }
-        }
-    }
+    private fun discoverEndpoint(type: MdnsServiceType, timeoutMs: Long = 8_000): MdnsEndpoint? =
+        SafeMdnsResolver(this).find(type, timeoutMs)
 
     private fun sendFileToDiscord(fileData: ByteArray) {
         if (webhookUrl.isBlank()) { handler.post { toast("Add your Discord webhook in Settings to sync save.dat") }; return }
