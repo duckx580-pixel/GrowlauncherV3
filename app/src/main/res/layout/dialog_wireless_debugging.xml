@@ -31,7 +31,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Step 1: Turn on Developer Options and enable Wireless Debugging in your Android system settings.\n\nStep 2: Tap ‘Pair device with pairing code’. Keep that system screen open and copy its IP address, port, and six-digit Wi-Fi pairing code below.\n\nStep 3: Once connected, the launcher will automatically unlock higher powerful modmenu."
+            android:text="Step 1: Turn on Developer Options and enable Wireless Debugging in your Android system settings.\n\nStep 2: Tap ‘Pair device with pairing code’ in Android Settings. This app will automatically find its pairing service.\n\nStep 3: Enter only the six-digit Wi-Fi pairing code shown by Android. Once connected, the launcher will unlock higher powerful modmenu."
             android:textColor="#E5E1F5"
             android:textSize="14sp" />
 
@@ -40,7 +40,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:text="Enter the IP address, pairing port, and six-digit code shown by Android. Keep the pairing screen open while pairing."
+            android:text="Waiting for Android’s pairing service. Keep the system pairing dialog open, then enter its six-digit code here."
             android:textColor="#AAA4C0"
             android:textSize="13sp" />
 
@@ -53,31 +53,10 @@
             android:text="Open Wireless Debugging settings" />
 
         <EditText
-            android:id="@+id/wirelessHost"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:hint="IP address (for example, 192.168.1.20)"
-            android:inputType="text"
-            android:singleLine="true"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#AAA4C0" />
-
-        <EditText
-            android:id="@+id/wirelessPort"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Pairing port (for example, 42015)"
-            android:inputType="number"
-            android:maxLength="5"
-            android:singleLine="true"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#AAA4C0" />
-
-        <EditText
             android:id="@+id/wirelessPairingCode"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
             android:hint="Six-digit Wi-Fi pairing code"
             android:inputType="number"
             android:maxLength="6"
@@ -90,7 +69,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:text="Pair with entered details and sync save.dat" />
+            android:text="Pair and unlock modmenu" />
 
         <Button
             android:id="@+id/wirelessDismiss"

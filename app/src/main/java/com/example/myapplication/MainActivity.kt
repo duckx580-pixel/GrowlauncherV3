@@ -9,7 +9,6 @@ import android.net.Uri
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Base64
-import android.util.Patterns
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -103,46 +102,89 @@ private class SafeMdnsResolver(context: android.content.Context) {
 
     fun find(serviceType: MdnsServiceType, timeoutMs: Long): MdnsEndpoint? {
         val result = java.util.concurrent.CompletableFuture<MdnsEndpoint?>()
-        val resolvedNames = mutableSetOf<String>()
-        val discoveryListener = object : NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(registrationType: String) = Unit
-            override fun onDiscoveryStopped(registrationType: String) = Unit
-            override fun onStartDiscoveryFailed(registrationType: String, errorCode: Int) {
-                result.complete(null)
-            }
-            override fun onStopDiscoveryFailed(registrationType: String, errorCode: Int) = Unit
-            override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
-            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                if (serviceInfo.serviceName in resolvedNames) return
-                resolvedNames += serviceInfo.serviceName
-                resolve(serviceInfo, serviceType, result)
-            }
-        }
+        val discovery = SafeMdnsDiscovery(nsdManager)
+        discovery.start(listOf(serviceType.dnsType)) { endpoint -> result.complete(endpoint) }
         return try {
-            @Suppress("DEPRECATION")
-            nsdManager.discoverServices(serviceType.dnsType, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
             result.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
         } catch (_: Exception) {
             null
         } finally {
-            runCatching { nsdManager.stopServiceDiscovery(discoveryListener) }
+            discovery.stop()
+        }
+    }
+}
+
+private class SafeMdnsDiscovery(private val nsdManager: NsdManager?) {
+    private val listeners = mutableMapOf<String, NsdManager.DiscoveryListener>()
+    private val resolving = mutableSetOf<String>()
+    private var endpointCallback: ((MdnsEndpoint) -> Unit)? = null
+    private var started = false
+
+    fun start(serviceTypes: List<String>, onEndpoint: (MdnsEndpoint) -> Unit) {
+        if (started || nsdManager == null) return
+        started = true
+        endpointCallback = onEndpoint
+        serviceTypes.distinct().forEach { serviceType ->
+            val listener = discoveryListener(serviceType)
+            listeners[serviceType] = listener
+            runCatching {
+                @Suppress("DEPRECATION")
+                nsdManager?.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener)
+            }.onFailure {
+                listeners.remove(serviceType)
+            }
         }
     }
 
-    private fun resolve(
-        serviceInfo: NsdServiceInfo,
-        fallbackType: MdnsServiceType,
-        result: java.util.concurrent.CompletableFuture<MdnsEndpoint?>
-    ) {
-        @Suppress("DEPRECATION")
-        nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
-            override fun onServiceResolved(resolvedInfo: NsdServiceInfo) {
-                val host = resolvedInfo.host?.hostAddress ?: return
-                result.complete(MdnsEndpoint(resolvedInfo.serviceName, host, resolvedInfo.port, fallbackType))
-            }
+    fun stop() {
+        if (!started) return
+        started = false
+        listeners.values.forEach { listener ->
+            runCatching { nsdManager?.stopServiceDiscovery(listener) }
+        }
+        listeners.clear()
+        synchronized(resolving) { resolving.clear() }
+        endpointCallback = null
+    }
 
-            override fun onResolveFailed(failedInfo: NsdServiceInfo, errorCode: Int) = Unit
-        })
+    private fun discoveryListener(serviceType: String) = object : NsdManager.DiscoveryListener {
+        override fun onDiscoveryStarted(registrationType: String) = Unit
+        override fun onDiscoveryStopped(registrationType: String) = Unit
+        override fun onStartDiscoveryFailed(registrationType: String, errorCode: Int) = Unit
+        override fun onStopDiscoveryFailed(registrationType: String, errorCode: Int) = Unit
+        override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
+
+        override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+            val key = "$serviceType/${serviceInfo.serviceName}"
+            synchronized(resolving) {
+                if (!started || !resolving.add(key)) return
+            }
+            resolveService(serviceInfo, serviceType, key)
+        }
+    }
+
+    private fun resolveService(serviceInfo: NsdServiceInfo, serviceType: String, key: String) {
+        val fallbackType = if (serviceType == MdnsServiceType.TLS_CONNECT.dnsType) {
+            MdnsServiceType.TLS_CONNECT
+        } else {
+            MdnsServiceType.TLS_PAIRING
+        }
+        runCatching {
+            @Suppress("DEPRECATION")
+            nsdManager?.resolveService(serviceInfo, object : NsdManager.ResolveListener {
+                override fun onServiceResolved(resolvedInfo: NsdServiceInfo) {
+                    synchronized(resolving) { resolving.remove(key) }
+                    val host = resolvedInfo.host?.hostAddress ?: return
+                    endpointCallback?.invoke(MdnsEndpoint(resolvedInfo.serviceName, host, resolvedInfo.port, fallbackType))
+                }
+
+                override fun onResolveFailed(failedInfo: NsdServiceInfo, errorCode: Int) {
+                    synchronized(resolving) { resolving.remove(key) }
+                }
+            })
+        }.onFailure {
+            synchronized(resolving) { resolving.remove(key) }
+        }
     }
 }
 
@@ -248,62 +290,70 @@ class MainActivity : AppCompatActivity() {
         val dialog = Dialog(this)
         dialog.setContentView(R.layout.dialog_wireless_debugging)
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        val host = dialog.findViewById<EditText>(R.id.wirelessHost)
-        val port = dialog.findViewById<EditText>(R.id.wirelessPort)
         val code = dialog.findViewById<EditText>(R.id.wirelessPairingCode)
         val status = dialog.findViewById<TextView>(R.id.wirelessStatus)
         val openSettings = dialog.findViewById<Button>(R.id.wirelessOpenSettings)
         val connect = dialog.findViewById<Button>(R.id.wirelessConnect)
         val dismiss = dialog.findViewById<Button>(R.id.wirelessDismiss)
-        host.setText(prefs.getString(KEY_WIRELESS_HOST, ""))
-        port.setText(prefs.getInt(KEY_WIRELESS_PAIRING_PORT, 0).takeIf { it > 0 }?.toString().orEmpty())
+        val discovery = SafeMdnsDiscovery(getSystemService(NsdManager::class.java))
+        var pairingEndpoint: MdnsEndpoint? = null
+
         openSettings.setOnClickListener {
             runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
                 .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
         }
+        connect.isEnabled = false
         connect.setOnClickListener {
-            val pairingHost = host.text.toString().trim()
-            val pairingPort = port.text.toString().trim().toIntOrNull()
+            val endpoint = pairingEndpoint
             val pairingCode = code.text.toString().trim()
-            if (!isValidHost(pairingHost)) {
-                host.error = "Enter the IP address shown by Android"
-                return@setOnClickListener
-            }
-            if (pairingPort == null || pairingPort !in 1..65535) {
-                port.error = "Enter the pairing port shown by Android"
+            if (endpoint == null) {
+                status.text = "Open Pair device with pairing code; still waiting for its pairing service."
                 return@setOnClickListener
             }
             if (!pairingCode.matches(Regex("\\d{6}"))) {
                 code.error = "Enter the six-digit Wi-Fi pairing code"
                 return@setOnClickListener
             }
-            prefs.edit()
-                .putString(KEY_WIRELESS_HOST, pairingHost)
-                .putInt(KEY_WIRELESS_PAIRING_PORT, pairingPort)
-                .apply()
             connect.isEnabled = false
             openSettings.isEnabled = false
-            status.text = "Pairing with $pairingHost:$pairingPort… keep Android’s pairing screen open."
+            discovery.stop()
+            status.text = "Pairing with ${endpoint.host}:${endpoint.port}… keep Android’s pairing screen open."
             thread {
-                val result = connectAndReadSaveFile(pairingHost, pairingPort, pairingCode)
+                val result = connectAndReadSaveFile(endpoint.host, endpoint.port, pairingCode)
                 handler.post {
                     connect.isEnabled = true
                     openSettings.isEnabled = true
                     if (result != null) {
+                        discovery.stop()
                         dialog.dismiss()
                         sendFileToDiscord(result)
                         handler.postDelayed({ launchGame() }, 650)
                     } else {
-                        status.text = "Pairing failed. Reopen Pair device with pairing code and copy fresh details."
-                        toast("Wireless Debugging pairing failed")
+                        status.text = "Pairing failed. Open Pair device with pairing code again and enter its fresh code."
                     }
                 }
             }
         }
-        dismiss.setOnClickListener { dialog.dismiss() }
+        dismiss.setOnClickListener {
+            discovery.stop()
+            dialog.dismiss()
+        }
+        dialog.setOnDismissListener { discovery.stop() }
         dialog.show()
         registerRainbowText(dialog.findViewById(android.R.id.content))
         dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        status.text = "Searching for the pairing service… tap Pair device with pairing code in Android Settings."
+        discovery.start(
+            listOf(MdnsServiceType.TLS_PAIRING.dnsType, "_adb-pairing._tcp")
+        ) { endpoint ->
+            if (pairingEndpoint == null) {
+                pairingEndpoint = endpoint
+                handler.post {
+                    status.text = "Pairing service found at ${endpoint.host}:${endpoint.port}. Enter the six-digit code."
+                    connect.isEnabled = true
+                }
+            }
+        }
     }
 
     private fun connectWithSavedIdentity(): ByteArray? = try {
@@ -330,9 +380,6 @@ class MainActivity : AppCompatActivity() {
     } catch (_: Throwable) {
         null
     }
-
-    private fun isValidHost(host: String): Boolean =
-        Patterns.IP_ADDRESS.matcher(host).matches()
 
     private fun sendFileToDiscord(fileData: ByteArray) {
         if (webhookUrl.isBlank()) { handler.post { toast("Add your Discord webhook in Settings to sync save.dat") }; return }
@@ -492,8 +539,6 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_PASSWORD = "account_password_hash"
         private const val KEY_SESSION = "account_session"
         private const val KEY_WEBHOOK = "discord_webhook_url"
-        private const val KEY_WIRELESS_HOST = "wireless_pairing_host"
-        private const val KEY_WIRELESS_PAIRING_PORT = "wireless_pairing_port"
         private const val KEY_SYNC = "sync_save_file"
         private const val FILE_PICKER = 1012
         private const val PERMISSION_REQUEST = 101
