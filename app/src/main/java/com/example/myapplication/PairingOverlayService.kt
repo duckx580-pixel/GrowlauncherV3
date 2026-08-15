@@ -50,7 +50,7 @@ class PairingOverlayService : Service() {
     private fun notification(text: String): Notification {
         val actionIntent = if (found) {
             Intent(this, PairingCodeDialogActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
                 putExtra(EXTRA_HOST, pairingHost)
                 putExtra(EXTRA_PORT, pairingPort)
             }
@@ -79,6 +79,8 @@ class PairingOverlayService : Service() {
             .setContentTitle("Wireless Debugging")
             .setContentText(text)
             .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
             .addAction(0, if (found) "ENTER PAIRING CODE" else "STOP SEARCHING", action)
             .build()
     }
@@ -89,9 +91,17 @@ class PairingOverlayService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Wireless Debugging", NotificationManager.IMPORTANCE_LOW)
-            )
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Wireless Debugging",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Wireless debugging pairing notifications"
+                setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI, null)
+                enableVibration(true)
+                enableLights(true)
+            }
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
