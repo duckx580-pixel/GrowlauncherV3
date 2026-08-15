@@ -51,7 +51,7 @@ class PairingOverlayService : Service() {
     }
 
     private fun notification(text: String): Notification {
-        val actionIntent = if (found) {
+        if (found) {
             // Use RemoteInput for inline text entry (Shizuku-style)
             val remoteInput = RemoteInput.Builder(KEY_PAIRING_CODE)
                 .setLabel("Pairing code")
@@ -85,29 +85,24 @@ class PairingOverlayService : Service() {
                 )
                 .build()
         } else {
-            Intent(this, PairingOverlayService::class.java).setAction(ACTION_STOP)
-        }
-        
-        val action = if (!found) {
-            PendingIntent.getService(
+            val stopIntent = Intent(this, PairingOverlayService::class.java).setAction(ACTION_STOP)
+            val stopPendingIntent = PendingIntent.getService(
                 this,
                 11,
-                actionIntent,
+                stopIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-        } else {
-            return actionIntent as Notification
+            
+            return NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setContentTitle("Wireless Debugging")
+                .setContentText(text)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                .addAction(0, "STOP SEARCHING", stopPendingIntent)
+                .build()
         }
-        
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_warning)
-            .setContentTitle("Wireless Debugging")
-            .setContentText(text)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .addAction(0, "STOP SEARCHING", action)
-            .build()
     }
 
     private fun updateNotification(text: String) {
