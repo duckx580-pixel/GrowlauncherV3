@@ -36,6 +36,7 @@ import androidx.documentfile.provider.DocumentFile
 import com.flyfishxu.kadb.Kadb
 import com.flyfishxu.kadb.cert.KadbCert
 import com.flyfishxu.kadb.cert.KadbPrivateKeyStore
+import com.flyfishxu.kadb.mdns.MdnsEndpoint
 import com.flyfishxu.kadb.mdns.MdnsServiceType
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
