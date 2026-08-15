@@ -55,7 +55,7 @@ import java.util.Locale
 import kotlin.concurrent.thread
 
 
-private class WirelessAdbIdentityStore(context: android.content.Context) : KadbPrivateKeyStore {
+internal class WirelessAdbIdentityStore(context: android.content.Context) : KadbPrivateKeyStore {
     private val prefs = context.getSharedPreferences("wireless_adb_identity", android.content.Context.MODE_PRIVATE)
     private val alias = "growlauncher_wireless_adb_key"
 
@@ -96,7 +96,7 @@ private class WirelessAdbIdentityStore(context: android.content.Context) : KadbP
     }
 }
 
-private class SafeMdnsResolver(context: android.content.Context) {
+internal class SafeMdnsResolver(context: android.content.Context) {
     private val nsdManager = context.applicationContext.getSystemService(NsdManager::class.java)
 
     fun find(serviceType: MdnsServiceType, timeoutMs: Long): MdnsEndpoint? {
