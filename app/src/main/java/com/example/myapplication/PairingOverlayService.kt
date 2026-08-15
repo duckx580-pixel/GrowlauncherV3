@@ -50,7 +50,7 @@ class PairingOverlayService : Service() {
     private fun notification(text: String): Notification {
         val actionIntent = if (found) {
             Intent(this, PairingCodeDialogActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra(EXTRA_HOST, pairingHost)
                 putExtra(EXTRA_PORT, pairingPort)
             }
