@@ -34,7 +34,9 @@ Also added to notification builder:
 ### Bug 2: App Crashes When Tapping "ENTER PAIRING CODE" ✅ FIXED
 **Problem:** "Growlauncher v5.54 keeps stopping" crash when tapping the notification action button.
 
-**Root Cause:** Transparent dialog activity launched from background service notification lacked proper window flags and appropriate intent flags.
+**Root Cause:** Multiple issues:
+1. Transparent dialog activity launched from background service notification lacked proper window flags
+2. Using `androidx.appcompat.app.AlertDialog` with non-AppCompat theme caused `IllegalStateException`
 
 **Fix Applied:**
 
@@ -52,7 +54,14 @@ if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
 }
 ```
 
-2. **Updated Intent Flags:**
+2. **Changed AlertDialog Import:**
+```kotlin
+// Before: import androidx.appcompat.app.AlertDialog
+// After: import android.app.AlertDialog
+```
+The regular Android AlertDialog works with `Theme.Translucent.NoTitleBar`, while AppCompat version requires `Theme.AppCompat`.
+
+3. **Updated Intent Flags:**
 ```kotlin
 // In notification() method
 flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
@@ -60,12 +69,13 @@ flags = Intent.FLAG_ACTIVITY_NEW_TASK or
         Intent.FLAG_ACTIVITY_SINGLE_TOP
 ```
 
-3. **Manifest Configuration:**
+4. **Manifest Configuration:**
 ```xml
 <activity
     android:name=".PairingCodeDialogActivity"
     ...
     android:launchMode="singleInstance"
+    android:theme="@android:style/Theme.Translucent.NoTitleBar"
     ...
 />
 ```
@@ -108,7 +118,7 @@ After pulling these fixes:
 
 ## 📦 Commit Info
 
-**Latest Commit:** `75c4a07`  
+**Latest Commit:** `dcfbc99`  
 **Branch:** `feature/shizuku-style-notification`  
 **Status:** Pushed to GitHub ✅
 
