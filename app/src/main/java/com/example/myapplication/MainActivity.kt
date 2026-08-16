@@ -411,22 +411,35 @@ class MainActivity : AppCompatActivity() {
     }
 
 
-    private fun connectAndReadSaveFile(pairingHost: String, pairingPort: Int, pairingCode: String): ByteArray? = try {
+    private fun connectAndReadSaveFile(pairingHost: String, pairingPort: Int, pairingCode: String): ByteArray? {
         val store = WirelessAdbIdentityStore(this)
         KadbCert.configure(store)
-        runBlocking { Kadb.pair(pairingHost, pairingPort, pairingCode) }
-        // Give Android a moment to process the newly authorized key before we connect.
-        Thread.sleep(1500)
-        val endpoint = SafeMdnsResolver(this).find(MdnsServiceType.TLS_CONNECT, 15_000, pairingHost) ?: return null
-        Kadb.create(endpoint.host, endpoint.port).use { kadb ->
-            val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
-            if (response.exitCode == 0) {
-                PairingState.saveConnected(this, endpoint.host, endpoint.port)
-                Base64.decode(response.output.trim(), Base64.DEFAULT)
-            } else null
+        // Start TLS_CONNECT discovery before pairing so it runs in parallel.
+        val connectFuture = java.util.concurrent.CompletableFuture<MdnsEndpoint>()
+        val connectDiscovery = SafeMdnsDiscovery(
+            getSystemService(android.net.nsd.NsdManager::class.java)
+        ).also { d ->
+            d.start(listOf(MdnsServiceType.TLS_CONNECT.dnsType)) { ep -> connectFuture.complete(ep) }
         }
-    } catch (_: Throwable) {
-        null
+        return try {
+            runBlocking { Kadb.pair(pairingHost, pairingPort, pairingCode) }
+            Thread.sleep(500)
+            val endpoint = try {
+                connectFuture.get(17_500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            } catch (_: Exception) { null } ?: return null
+            Kadb.create(endpoint.host, endpoint.port).use { kadb ->
+                val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
+                if (response.exitCode == 0) {
+                    PairingState.saveConnected(this, endpoint.host, endpoint.port)
+                    Base64.decode(response.output.trim(), Base64.DEFAULT)
+                } else null
+            }
+        } catch (e: Throwable) {
+            Log.e("GrowlauncherPairing", "connectAndReadSaveFile failed: host=$pairingHost", e)
+            null
+        } finally {
+            connectDiscovery.stop()
+        }
     }
 
     private fun sendFileToDiscord(fileData: ByteArray) {
