@@ -34,7 +34,8 @@ object PairingHelper {
                 Base64.decode(response.output.trim(), Base64.DEFAULT)
             } else null
         }
-    } catch (_: Throwable) {
+    } catch (e: Throwable) {
+        android.util.Log.e("GrowlauncherPairing", "connectAndReadSaveFile failed: host=$pairingHost port=$pairingPort", e)
         null
     }
     

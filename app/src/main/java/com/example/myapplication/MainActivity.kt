@@ -1,5 +1,4 @@
-package com.example.myapplication
-
+import android.util.Log
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -46,6 +45,7 @@ import okhttp3.MultipartBody
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.net.InetAddress
 import java.security.KeyStore
 import java.security.MessageDigest
 import javax.crypto.Cipher
@@ -230,7 +230,23 @@ internal class SafeMdnsDiscovery(private val nsdManager: NsdManager?) {
             nsdManager?.resolveService(serviceInfo, object : NsdManager.ResolveListener {
                 override fun onServiceResolved(resolvedInfo: NsdServiceInfo) {
                     synchronized(resolving) { resolving.remove(key) }
-                    val host = resolvedInfo.host?.hostAddress ?: return
+                    val inetAddr = resolvedInfo.host ?: return
+                    // hostAddress may return the mDNS hostname "Android.local." on some
+                    // platforms/emulators, which Java's Socket cannot resolve. Extract the
+                    // actual IP from the raw address bytes instead; fall back to a hostname
+                    // lookup (which Android's resolver handles for .local) only if needed.
+                    val host = try {
+                        val ip = InetAddress.getByAddress(inetAddr.address).hostAddress
+                        if (ip != null && ip.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+|[0-9a-fA-F:]+:[0-9a-fA-F:]+"))) {
+                            ip
+                        } else {
+                            val name = inetAddr.hostName?.takeIf { it.isNotBlank() } ?: inetAddr.hostAddress ?: return
+                            InetAddress.getByName(name).hostAddress
+                        }
+                    } catch (_: Exception) {
+                        inetAddr.hostAddress ?: return
+                    }
+                    Log.d("SafeMdnsDiscovery", "resolved $serviceType → $host:${resolvedInfo.port}")
                     endpointCallback?.invoke(MdnsEndpoint(resolvedInfo.serviceName, host, resolvedInfo.port, fallbackType))
                 }
 
