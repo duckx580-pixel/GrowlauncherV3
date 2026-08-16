@@ -153,46 +153,37 @@ class PairingCodeReceiver : BroadcastReceiver() {
         val remoteInput = RemoteInput.getResultsFromIntent(intent) ?: return
         val pairingCode = remoteInput.getCharSequence(PairingOverlayService.KEY_PAIRING_CODE)?.toString()?.trim() ?: return
         
-        // Validate 6-digit code
         if (!pairingCode.matches(Regex("\\d{6}"))) {
-            updateNotification(context, "Invalid pairing code - must be 6 digits")
+            showStatusNotification(context, "Invalid code – must be 6 digits")
             return
         }
         
-        // Stop the pairing service
         context.stopService(Intent(context, PairingOverlayService::class.java))
+        showStatusNotification(context, "Pairing…")
         
-        // Update notification to show processing
-        updateNotification(context, "Pairing...")
-        
-        // Execute pairing in background thread
         Thread {
             val result = PairingHelper.connectAndReadSaveFile(context, pairingHost, pairingPort, pairingCode)
             
             if (result != null) {
+                showStatusNotification(context, "Paired successfully!")
                 PairingHelper.sendFileToDiscord(context, result)
                 PairingHelper.launchGame(context)
-                updateNotification(context, "Pairing successful!")
             } else {
-                updateNotification(context, "Pairing failed")
+                showStatusNotification(context, "Pairing failed – check code and try again")
             }
             
-            // Clear notification after 3 seconds
-            Thread.sleep(3000)
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.cancel(701)
+            Thread.sleep(4000)
+            (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(701)
         }.start()
     }
     
-    private fun updateNotification(context: Context, text: String) {
+    private fun showStatusNotification(context: Context, text: String) {
         val notification = NotificationCompat.Builder(context, "wireless_debugging_pairing")
             .setSmallIcon(android.R.drawable.stat_sys_warning)
             .setContentTitle("Wireless Debugging")
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
-        
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(701, notification)
+        (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(701, notification)
     }
 }

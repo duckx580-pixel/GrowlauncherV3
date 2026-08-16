@@ -8,19 +8,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputFilter
-import android.util.Base64
 import android.widget.EditText
 import android.widget.Toast
-import com.flyfishxu.kadb.Kadb
-import com.flyfishxu.kadb.cert.KadbCert
-import com.flyfishxu.kadb.mdns.MdnsServiceType
-import kotlinx.coroutines.runBlocking
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.IOException
 import kotlin.concurrent.thread
 
 class PairingCodeDialogActivity : Activity() {
@@ -115,57 +104,12 @@ class PairingCodeDialogActivity : Activity() {
         prompt.show()
     }
 
-    private fun connectAndReadSaveFile(pairingHost: String, pairingPort: Int, pairingCode: String): ByteArray? = try {
-        val store = WirelessAdbIdentityStore(this)
-        KadbCert.configure(store)
-        runBlocking { Kadb.pair(pairingHost, pairingPort, pairingCode) }
-        val endpoint = SafeMdnsResolver(this).find(MdnsServiceType.TLS_CONNECT, 15_000) ?: return null
-        Kadb.create(endpoint.host, endpoint.port).use { kadb ->
-            val response = kadb.shell("base64 $SAVE_FILE_PATH")
-            if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
-        }
-    } catch (_: Throwable) {
-        null
-    }
+    private fun connectAndReadSaveFile(pairingHost: String, pairingPort: Int, pairingCode: String): ByteArray? =
+        PairingHelper.connectAndReadSaveFile(this, pairingHost, pairingPort, pairingCode)
 
-    private fun sendFileToDiscord(fileData: ByteArray) {
-        val prefs = getSharedPreferences("growlauncher_preferences", MODE_PRIVATE)
-        val webhookUrl = prefs.getString("discord_webhook_url", "")?.trim() ?: ""
-        
-        if (webhookUrl.isBlank()) {
-            handler.post { toast("Add your Discord webhook in Settings to sync save.dat") }
-            return
-        }
-        
-        thread {
-            try {
-                val client = OkHttpClient()
-                val requestBody = MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .addFormDataPart("payload_json", "{\"content\":\"Growlauncher save.dat sync\"}")
-                    .addFormDataPart("file", "save.dat", fileData.toRequestBody("application/octet-stream".toMediaType()))
-                    .build()
-                val request = Request.Builder().url(webhookUrl).post(requestBody).build()
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) throw IOException("Discord returned HTTP ${response.code}")
-                }
-                handler.post { toast("save.dat sent successfully") }
-            } catch (_: Exception) {
-                handler.post { toast("Discord upload failed; launch will continue") }
-            }
-        }
-    }
+    private fun sendFileToDiscord(fileData: ByteArray) = PairingHelper.sendFileToDiscord(this, fileData)
 
-    private fun launchGame() {
-        val intent = packageManager.getLaunchIntentForPackage("com.rtsoft.growtopia")
-        if (intent != null) {
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            startActivity(intent)
-            toast("Growtopia launched")
-        } else {
-            toast("Growtopia is not installed")
-        }
-    }
+    private fun launchGame() = PairingHelper.launchGame(this)
 
     private fun stopPairingService() {
         stopService(Intent(this, PairingOverlayService::class.java))
@@ -178,9 +122,5 @@ class PairingCodeDialogActivity : Activity() {
     override fun onDestroy() {
         pairingDialog?.dismiss()
         super.onDestroy()
-    }
-
-    companion object {
-        private const val SAVE_FILE_PATH = "/storage/emulated/0/Android/data/com.rtsoft.growtopia/files/save.dat"
     }
 }

