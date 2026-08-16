@@ -1,3 +1,5 @@
+package com.example.myapplication
+
 import android.util.Log
 import android.app.Activity
 import android.content.Context
