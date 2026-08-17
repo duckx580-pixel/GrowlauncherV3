@@ -91,9 +91,6 @@ class PairingCodeDialogActivity : Activity() {
                         prompt.dismiss()
                         if (result != null) {
                             sendFileToDiscord(result)
-                            handler.postDelayed({ launchGame() }, 650)
-                        } else {
-                            toast("Failed to pair with wireless debugging")
                         }
                         finish()
                     }

