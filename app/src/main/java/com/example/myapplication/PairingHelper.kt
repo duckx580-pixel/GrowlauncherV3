@@ -27,16 +27,16 @@ object PairingHelper {
     
     fun connectAndReadSaveFile(context: Context, pairingHost: String, pairingPort: Int, pairingCode: String): ByteArray? {
         val store = WirelessAdbIdentityStore(context)
+        // Wipe any stale cached key before pairing so a reinstall always starts
+        // with a fresh identity and never fails due to a leftover invalid cert.
+        store.clear()
         KadbCert.configure(store)
 
-        // Start TLS_CONNECT discovery NOW, in parallel with the pairing handshake.
-        // The _adb-tls-connect._tcp service is already running but mDNS may not
-        // re-announce it to a newly-registered listener. Starting early maximises
-        // the window: by the time Kadb.pair() returns the discovery has been
-        // listening for ~2-3 s and is far more likely to have caught the record.
         val nsdManager = context.applicationContext.getSystemService(NsdManager::class.java)
         val connectFuture = CompletableFuture<MdnsEndpoint>()
-        val connectDiscovery = SafeMdnsDiscovery(nsdManager).also { d ->
+
+        // Start discovery before pair() to catch any early TLS_CONNECT announcement.
+        var activeDiscovery = SafeMdnsDiscovery(nsdManager).also { d ->
             d.start(listOf(MdnsServiceType.TLS_CONNECT.dnsType)) { endpoint ->
                 connectFuture.complete(endpoint)
             }
@@ -44,14 +44,23 @@ object PairingHelper {
 
         return try {
             runBlocking { Kadb.pair(pairingHost, pairingPort, pairingCode) }
-            // Short pause so Android can register the newly-authorized TLS cert
-            // before we attempt the connect-phase handshake.
-            Thread.sleep(500)
 
-            // Give the discovery up to 20 s total from when it started; subtract
-            // the time already elapsed during pairing (typically ~2 s).
+            // After pairing the device re-registers _adb-tls-connect._tcp with the
+            // newly-authorized cert. Restart discovery so the fresh announcement is
+            // not missed by the pre-pair listener (Android NSD doesn't always replay
+            // already-running services to an existing listener after a cert change).
+            Thread.sleep(800)
+            if (!connectFuture.isDone) {
+                activeDiscovery.stop()
+                activeDiscovery = SafeMdnsDiscovery(nsdManager).also { d ->
+                    d.start(listOf(MdnsServiceType.TLS_CONNECT.dnsType)) { endpoint ->
+                        connectFuture.complete(endpoint)
+                    }
+                }
+            }
+
             val endpoint = try {
-                connectFuture.get(17_500, TimeUnit.MILLISECONDS)
+                connectFuture.get(30_000, TimeUnit.MILLISECONDS)
             } catch (_: Exception) {
                 Log.e("GrowlauncherPairing", "TLS_CONNECT discovery timed out for host=$pairingHost")
                 null
@@ -71,7 +80,7 @@ object PairingHelper {
             Log.e("GrowlauncherPairing", "connectAndReadSaveFile failed: host=$pairingHost port=$pairingPort", e)
             null
         } finally {
-            connectDiscovery.stop()
+            activeDiscovery.stop()
         }
     }
     

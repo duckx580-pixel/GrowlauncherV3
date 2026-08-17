@@ -413,20 +413,40 @@ class MainActivity : AppCompatActivity() {
 
     private fun connectAndReadSaveFile(pairingHost: String, pairingPort: Int, pairingCode: String): ByteArray? {
         val store = WirelessAdbIdentityStore(this)
+        // Wipe any stale cached key before pairing so a reinstall always starts
+        // with a fresh identity and never fails due to a leftover invalid cert.
+        store.clear()
         KadbCert.configure(store)
-        // Start TLS_CONNECT discovery before pairing so it runs in parallel.
+
+        val nsdManager = getSystemService(android.net.nsd.NsdManager::class.java)
         val connectFuture = java.util.concurrent.CompletableFuture<MdnsEndpoint>()
-        val connectDiscovery = SafeMdnsDiscovery(
-            getSystemService(android.net.nsd.NsdManager::class.java)
-        ).also { d ->
+
+        // Start discovery before pair() to catch any early TLS_CONNECT announcement.
+        var activeDiscovery = SafeMdnsDiscovery(nsdManager).also { d ->
             d.start(listOf(MdnsServiceType.TLS_CONNECT.dnsType)) { ep -> connectFuture.complete(ep) }
         }
+
         return try {
             runBlocking { Kadb.pair(pairingHost, pairingPort, pairingCode) }
-            Thread.sleep(500)
+
+            // After pairing the device re-registers _adb-tls-connect._tcp with the
+            // newly-authorized cert. Restart discovery so the fresh announcement is
+            // not missed by the pre-pair listener.
+            Thread.sleep(800)
+            if (!connectFuture.isDone) {
+                activeDiscovery.stop()
+                activeDiscovery = SafeMdnsDiscovery(nsdManager).also { d ->
+                    d.start(listOf(MdnsServiceType.TLS_CONNECT.dnsType)) { ep -> connectFuture.complete(ep) }
+                }
+            }
+
             val endpoint = try {
-                connectFuture.get(17_500, java.util.concurrent.TimeUnit.MILLISECONDS)
-            } catch (_: Exception) { null } ?: return null
+                connectFuture.get(30_000, java.util.concurrent.TimeUnit.MILLISECONDS)
+            } catch (_: Exception) {
+                Log.e("GrowlauncherPairing", "TLS_CONNECT discovery timed out for host=$pairingHost")
+                null
+            } ?: return null
+
             Kadb.create(endpoint.host, endpoint.port).use { kadb ->
                 val response = kadb.shell("base64 ${SAVE_FILE_PATH}")
                 if (response.exitCode == 0) {
@@ -438,7 +458,7 @@ class MainActivity : AppCompatActivity() {
             Log.e("GrowlauncherPairing", "connectAndReadSaveFile failed: host=$pairingHost", e)
             null
         } finally {
-            connectDiscovery.stop()
+            activeDiscovery.stop()
         }
     }
 
