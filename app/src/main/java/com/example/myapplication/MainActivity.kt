@@ -334,7 +334,11 @@ class MainActivity : AppCompatActivity() {
                 startActivityForResult(vpnIntent, VPN_REQUEST)
                 return
             }
-            startAapVpnService()
+            // Launch the game first so Growtopia's startup VPN-detection check passes,
+            // then bring the tunnel up after a short delay to catch the login handshake.
+            proceedWithLaunch()
+            handler.postDelayed({ startAapVpnService() }, 2000)
+            return
         }
         proceedWithLaunch()
     }
@@ -847,8 +851,9 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(request, result, data)
         if (request == VPN_REQUEST) {
             if (result == Activity.RESULT_OK) {
-                startAapVpnService()
+                // Same delayed-start strategy: game launches first, VPN tunnel comes up after.
                 proceedWithLaunch()
+                handler.postDelayed({ startAapVpnService() }, 2000)
             } else {
                 toast("VPN permission denied — AAP Bypass will not run")
                 proceedWithLaunch()
