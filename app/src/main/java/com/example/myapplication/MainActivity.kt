@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.net.VpnService
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Base64
@@ -28,6 +29,7 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -325,6 +327,23 @@ class MainActivity : AppCompatActivity() {
         findViewById<CardView>(R.id.btnLaunch).animate().scaleX(.97f).scaleY(.97f).setDuration(100).withEndAction {
             findViewById<CardView>(R.id.btnLaunch).animate().scaleX(1f).scaleY(1f).setDuration(180).start()
         }.start()
+        if (isAdmin() && prefs.getBoolean(KEY_AAP_ENABLED, false)) {
+            val vpnIntent = VpnService.prepare(this)
+            if (vpnIntent != null) {
+                // VPN permission not yet granted — resume in onActivityResult after user approves
+                startActivityForResult(vpnIntent, VPN_REQUEST)
+                return
+            }
+            // Launch the game first so Growtopia's startup VPN-detection check passes,
+            // then bring the tunnel up after a short delay to catch the login handshake.
+            proceedWithLaunch()
+            handler.postDelayed({ startAapVpnService() }, 2000)
+            return
+        }
+        proceedWithLaunch()
+    }
+
+    private fun proceedWithLaunch() {
         val accessStarted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             readSaveFileWithWirelessDebugging()
         } else {
@@ -344,6 +363,17 @@ class MainActivity : AppCompatActivity() {
         }
         if (!accessStarted) return
     }
+
+    private fun startAapVpnService() {
+        val mac = prefs.getString(KEY_AAP_MAC, null) ?: return
+        startService(Intent(this, LocalProxyVpnService::class.java).apply {
+            action = LocalProxyVpnService.ACTION_START
+            putExtra(LocalProxyVpnService.EXTRA_MAC, mac)
+        })
+    }
+
+    private fun isAdmin() =
+        authenticated() && prefs.getString(KEY_USER, null)?.trim() == ADMIN_EMAIL
 
     private fun launchGame() {
         val intent = packageManager.getLaunchIntentForPackage("com.rtsoft.growtopia")
@@ -690,6 +720,62 @@ class MainActivity : AppCompatActivity() {
             }
         }
         
+        // ── AAP Bypass / MAC Spoofing (admin-only) ───────────────────────────
+        val aapSection = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 24, 0, 0)
+            visibility = if (isAdmin()) View.VISIBLE else View.GONE
+        }
+        aapSection.addView(TextView(this).apply {
+            text = "AAP Bypass / MAC Spoofing"
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, 0, 0, 8)
+        })
+
+        @Suppress("DEPRECATION")
+        val aapToggle = Switch(this).apply {
+            text = "Enable AAP Bypass"
+            setTextColor(Color.WHITE)
+            isChecked = prefs.getBoolean(KEY_AAP_ENABLED, false)
+        }
+        aapSection.addView(aapToggle, params())
+
+        aapSection.addView(TextView(this).apply {
+            text = "Whitelisted MAC Address (XX:XX:XX:XX:XX:XX)"
+            textSize = 13f
+            setTextColor(Color.parseColor("#9CA3AF"))
+            setPadding(0, 12, 0, 4)
+        })
+        val macInput = EditText(this).apply {
+            hint = "e.g. c2:19:90:de:13:74"
+            setSingleLine()
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setText(prefs.getString(KEY_AAP_MAC, ""))
+        }
+        aapSection.addView(macInput, params())
+
+        val saveBtn = Button(this).apply {
+            text = "Save"
+            setOnClickListener {
+                val mac = macInput.text.toString().trim()
+                val macRegex = Regex("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
+                if (!macRegex.matches(mac)) {
+                    errorDialog("Invalid MAC address format. Use XX:XX:XX:XX:XX:XX.")
+                    return@setOnClickListener
+                }
+                prefs.edit()
+                    .putBoolean(KEY_AAP_ENABLED, aapToggle.isChecked)
+                    .putString(KEY_AAP_MAC, mac)
+                    .apply()
+                toast("AAP Bypass settings saved")
+            }
+        }
+        aapSection.addView(saveBtn, buttonParams())
+        box.addView(aapSection, params())
+
         val actions = LinearLayout(this).apply { gravity = Gravity.END; setPadding(0, 16, 0, 0) }
         actions.addView(Button(this).apply {
             text = "Log out"
@@ -700,7 +786,7 @@ class MainActivity : AppCompatActivity() {
             }
         }, buttonParams())
         box.addView(actions)
-        
+
         dialog("Pro Profile", box)
     }
 
@@ -763,6 +849,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onActivityResult(request: Int, result: Int, data: Intent?) {
         super.onActivityResult(request, result, data)
+        if (request == VPN_REQUEST) {
+            if (result == Activity.RESULT_OK) {
+                // Same delayed-start strategy: game launches first, VPN tunnel comes up after.
+                proceedWithLaunch()
+                handler.postDelayed({ startAapVpnService() }, 2000)
+            } else {
+                toast("VPN permission denied — AAP Bypass will not run")
+                proceedWithLaunch()
+            }
+            return
+        }
         if (request == FILE_PICKER && result == Activity.RESULT_OK) {
             val file = data?.data?.let { DocumentFile.fromSingleUri(this, it) }
             if (file?.name?.endsWith(".lua", true) == true) {
@@ -867,7 +964,11 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_LUA_FILES = "lua_files"
         private const val FILE_PICKER = 1012
         private const val PERMISSION_REQUEST = 101
+        private const val VPN_REQUEST = 1013
         private const val SAVE_FILE_PATH = "/storage/emulated/0/Android/data/com.rtsoft.growtopia/files/save.dat"
+        private const val KEY_AAP_ENABLED = "aap_bypass_enabled"
+        private const val KEY_AAP_MAC = "aap_whitelist_mac"
+        private const val ADMIN_EMAIL = "zennmiwaa@gmail.com"
     }
 }
 
