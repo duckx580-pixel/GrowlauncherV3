@@ -1114,7 +1114,7 @@ class MainActivity : AppCompatActivity() {
             val stripeHeight = height * 0.18f
             paint.shader = LinearGradient(
                 0f, offset, 0f, offset + stripeHeight,
-                intArrayOf(Color.TRANSPARENT, 0x40FFFFFF, 0x80FFFFFF, 0x40FFFFFF, Color.TRANSPARENT),
+                intArrayOf(Color.TRANSPARENT, 0x40FFFFFF.toInt(), 0x80FFFFFF.toInt(), 0x40FFFFFF.toInt(), Color.TRANSPARENT),
                 floatArrayOf(0f, 0.25f, 0.5f, 0.75f, 1f),
                 Shader.TileMode.CLAMP
             )
