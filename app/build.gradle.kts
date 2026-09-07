@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.myapplication"
+    namespace = "com.growlauncher"
     compileSdk = 37
 
     androidResources {
@@ -13,7 +13,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.myapplication"
+        applicationId = "com.growlauncher"
         minSdk = 24
         targetSdk = 34
         versionCode = 1

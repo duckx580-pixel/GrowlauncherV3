@@ -1,4 +1,4 @@
-package com.example.myapplication
+package com.growlauncher
 
 import android.app.Notification
 import android.app.NotificationChannel

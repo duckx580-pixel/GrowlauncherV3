@@ -1,4 +1,4 @@
-package com.example.myapplication
+package com.growlauncher
 
 import android.animation.Animator
 import android.animation.ValueAnimator
