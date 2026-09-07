@@ -1,5 +1,11 @@
 package com.example.myapplication
 
+import android.animation.ValueAnimator
+import android.graphics.Canvas
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.Shader
+import android.graphics.drawable.GradientDrawable
 import android.util.Log
 import android.app.Activity
 import android.content.Context
@@ -26,6 +32,7 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -284,7 +291,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var badge: TextView
     private val rainbowViews = linkedSetOf<TextView>()
-    private var rainbowAnimator: android.animation.ValueAnimator? = null
+    private var rainbowAnimator: ValueAnimator? = null
+    private val proAnimators = mutableListOf<ValueAnimator>()
 
 
     override fun onCreate(state: Bundle?) {
@@ -301,17 +309,100 @@ class MainActivity : AppCompatActivity() {
 
     private fun wireDashboard() {
         val launchCard = findViewById<CardView>(R.id.btnLaunch)
-        launchCard.setCardBackgroundColor(Color.parseColor("#1A083A"))
+        applyLaunchCardEffects(launchCard)
         launchCard.setOnClickListener { pulseCard(launchCard); launchWithFeedback() }
+
+        applySubCardGradient(R.id.btnScriptHub, "#1C1A38", "#0F0E20")
+        applySubCardGradient(R.id.btnSetting, "#101A28", "#090E18")
+        applySubCardGradient(R.id.btnLuaManager, "#101A12", "#090E0A")
+        applySubCardGradient(R.id.btnSound, "#1A1710", "#0E0C08")
+        applySubCardGradient(R.id.btnTheme, "#1A1025", "#0E0814")
+
         findViewById<CardView>(R.id.btnScriptHub).setOnClickListener { scriptHub() }
         findViewById<CardView>(R.id.btnSetting).setOnClickListener { settings() }
         findViewById<CardView>(R.id.btnLuaManager).setOnClickListener { luaManager() }
-        findViewById<CardView>(R.id.btnSound).setOnClickListener { toast("⚡ Sound tools are coming soon") }
+        findViewById<CardView>(R.id.btnSound).setOnClickListener { toast("Sound tools coming soon") }
         findViewById<CardView>(R.id.btnTheme).setOnClickListener { themePicker() }
         findViewById<CardView>(R.id.btnSwitchVersion).setOnClickListener { versionPicker() }
         findViewById<CardView>(R.id.runtimeCard).setOnClickListener {
             status.text = "● Checking runtime…"; status.setTextColor(color(R.color.accent))
-            handler.postDelayed({ status.text = "⚡ Online · 24 ms"; status.setTextColor(color(R.color.success)); toast("⚡ Runtime is healthy") }, 650)
+            handler.postDelayed({
+                status.text = "● Online · 24 ms"
+                status.setTextColor(color(R.color.success))
+                toast("Runtime is healthy")
+            }, 650)
+        }
+
+        applyGradientTitle()
+    }
+
+    private fun applyLaunchCardEffects(card: CardView) {
+        card.setCardBackgroundColor(Color.TRANSPARENT)
+        val tile = card.getChildAt(0) as? FrameLayout ?: return
+
+        // Deep purple gradient background
+        tile.background = GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(Color.parseColor("#3D1275"), Color.parseColor("#1A0640"))
+        )
+
+        // Radial glow overlay at bottom-center — pulses alpha
+        val glowView = View(this).apply {
+            isClickable = false
+            isFocusable = false
+            background = GradientDrawable().apply {
+                gradientType = GradientDrawable.RADIAL_GRADIENT
+                setGradientCenter(0.5f, 1.0f)
+                gradientRadius = 460f
+                colors = intArrayOf(Color.parseColor("#708054FF"), Color.parseColor("#308054FF"), Color.TRANSPARENT)
+            }
+        }
+        tile.addView(glowView, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        ValueAnimator.ofFloat(0.45f, 1f).apply {
+            duration = 1900
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { glowView.alpha = it.animatedValue as Float }
+            start()
+        }.also { proAnimators.add(it) }
+
+        // Shimmer scan line
+        val shimmer = ShimmerScanView(this)
+        tile.addView(shimmer, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        shimmer.start()
+    }
+
+    private fun applySubCardGradient(cardId: Int, startHex: String, endHex: String) {
+        val card = findViewById<CardView>(cardId)
+        card.setCardBackgroundColor(Color.TRANSPARENT)
+        (card.getChildAt(0) as? ViewGroup)?.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(Color.parseColor(startHex), Color.parseColor(endHex))
+        )
+    }
+
+    private fun applyGradientTitle() {
+        val title = findViewById<TextView>(R.id.headerTitle) ?: return
+        title.post {
+            if (title.width == 0) return@post
+            title.paint.shader = LinearGradient(
+                0f, 0f, title.width.toFloat(), 0f,
+                intArrayOf(
+                    Color.parseColor("#B07FFF"),
+                    Color.parseColor("#8054FF"),
+                    Color.parseColor("#60A5FA")
+                ),
+                null,
+                Shader.TileMode.CLAMP
+            )
+            title.invalidate()
         }
     }
 
@@ -832,6 +923,8 @@ class MainActivity : AppCompatActivity() {
         rainbowAnimator?.cancel()
         rainbowAnimator = null
         rainbowViews.clear()
+        proAnimators.forEach { it.cancel() }
+        proAnimators.clear()
         super.onDestroy()
     }
     private fun versionPicker() { val versions = arrayOf("5.54", "5.55", "5.56", "5.57"); AlertDialog.Builder(this).setTitle("Switch launcher version").setSingleChoiceItems(versions, versions.indexOf(prefs.getString(KEY_VERSION, "5.54"))) { d, i -> prefs.edit().putString(KEY_VERSION, versions[i]).apply(); refreshVersion(); d.dismiss(); toast("Configuration updated to v${versions[i]}") }.setNegativeButton("Cancel", null).show() }
@@ -857,6 +950,42 @@ class MainActivity : AppCompatActivity() {
             alert.show()
         }
     private data class Script(val name: String, val category: String, val description: String)
+
+    private inner class ShimmerScanView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var offset = -400f
+
+        init {
+            isClickable = false
+            isFocusable = false
+            setLayerType(LAYER_TYPE_HARDWARE, null)
+        }
+
+        fun start() {
+            ValueAnimator.ofFloat(-400f, 1600f).apply {
+                duration = 2500
+                repeatCount = ValueAnimator.INFINITE
+                startDelay = 600
+                addUpdateListener {
+                    offset = it.animatedValue as Float
+                    postInvalidateOnAnimation()
+                }
+                start()
+            }.also { proAnimators.add(it) }
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            if (width == 0 || height == 0) return
+            val stripeHeight = height * 0.18f
+            paint.shader = LinearGradient(
+                0f, offset, 0f, offset + stripeHeight,
+                intArrayOf(Color.TRANSPARENT, 0x40FFFFFF, 0x80FFFFFF, 0x40FFFFFF, Color.TRANSPARENT),
+                floatArrayOf(0f, 0.25f, 0.5f, 0.75f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(0f, offset, width.toFloat(), offset + stripeHeight, paint)
+        }
+    }
 
     companion object {
         private const val PREFS = "growlauncher_preferences"
