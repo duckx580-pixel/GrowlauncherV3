@@ -1,10 +1,12 @@
 package com.example.myapplication
 
+import android.animation.Animator
 import android.animation.ValueAnimator
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
+import android.graphics.SweepGradient
 import android.graphics.drawable.GradientDrawable
 import android.util.Log
 import android.app.Activity
@@ -377,6 +379,22 @@ class MainActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.MATCH_PARENT
         ))
         shimmer.start()
+
+        // Unicorn rotating rainbow overlay
+        val unicorn = UnicornOverlayView(this)
+        tile.addView(unicorn, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        unicorn.start()
+
+        // Lightning bolt discharge
+        val lightning = LightningFlashView(this)
+        tile.addView(lightning, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        lightning.start()
     }
 
     private fun applySubCardGradient(cardId: Int, startHex: String, endHex: String) {
@@ -949,6 +967,123 @@ class MainActivity : AppCompatActivity() {
             alert.setOnShowListener { _ -> registerRainbowText(alert.window?.decorView ?: view) }
             alert.show()
         }
+    // Rotating rainbow sweep — unicorn iridescent overlay on launch card
+    private inner class UnicornOverlayView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var hueOffset = 0f
+
+        init {
+            isClickable = false
+            isFocusable = false
+            alpha = 0.22f
+            setLayerType(LAYER_TYPE_HARDWARE, null)
+        }
+
+        fun start() {
+            ValueAnimator.ofFloat(0f, 360f).apply {
+                duration = 5000
+                repeatCount = ValueAnimator.INFINITE
+                addUpdateListener {
+                    hueOffset = it.animatedValue as Float
+                    postInvalidateOnAnimation()
+                }
+                start()
+            }.also { proAnimators.add(it) }
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            if (width == 0) return
+            val cx = width / 2f
+            val cy = height / 2f
+            val stops = 7
+            val colors = IntArray(stops) { i ->
+                Color.HSVToColor(floatArrayOf((hueOffset + i * (360f / (stops - 1))) % 360f, 0.85f, 1f))
+            }
+            paint.shader = SweepGradient(cx, cy, colors, null)
+            canvas.drawCircle(cx, cy, maxOf(width, height).toFloat(), paint)
+        }
+    }
+
+    // Branching lightning bolts that flash periodically from the tile center
+    private inner class LightningFlashView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+        private var segments: List<FloatArray> = emptyList()
+        private var flashAlpha = 0f
+        private val boltHandler = Handler(Looper.getMainLooper())
+
+        init {
+            isClickable = false
+            isFocusable = false
+            setLayerType(LAYER_TYPE_HARDWARE, null)
+        }
+
+        fun start() { scheduleNext() }
+
+        private fun scheduleNext() {
+            val delay = 2200L + (Math.random() * 3000).toLong()
+            boltHandler.postDelayed({
+                if (!isAttachedToWindow) return@postDelayed
+                val cx = width / 2f
+                val cy = height / 2f
+                segments = if (Math.random() < 0.6) {
+                    // Downward ground-strike from center
+                    buildBolt(cx, cy, cx + (Math.random().toFloat() - 0.5f) * width, height.toFloat() + 40, width * 0.35f, 5)
+                } else {
+                    // Radial burst outward
+                    val angle = (Math.random() * 360 * Math.PI / 180).toFloat()
+                    val dist = 60f + Math.random().toFloat() * 90
+                    buildBolt(cx, cy, cx + Math.cos(angle.toDouble()).toFloat() * dist, cy + Math.sin(angle.toDouble()).toFloat() * dist, width * 0.3f, 4)
+                }
+                ValueAnimator.ofFloat(1f, 0f).apply {
+                    duration = 650
+                    addUpdateListener { flashAlpha = it.animatedValue as Float; postInvalidateOnAnimation() }
+                    addListener(object : Animator.AnimatorListener {
+                        override fun onAnimationStart(a: Animator) {}
+                        override fun onAnimationCancel(a: Animator) {}
+                        override fun onAnimationRepeat(a: Animator) {}
+                        override fun onAnimationEnd(a: Animator) { segments = emptyList(); scheduleNext() }
+                    })
+                    start()
+                }.also { proAnimators.add(it) }
+            }, delay)
+        }
+
+        private fun buildBolt(x1: Float, y1: Float, x2: Float, y2: Float, rough: Float, depth: Int): List<FloatArray> {
+            if (depth == 0) return listOf(floatArrayOf(x1, y1, x2, y2))
+            val mx = (x1 + x2) / 2 + (Math.random().toFloat() - 0.5f) * rough
+            val my = (y1 + y2) / 2 + (Math.random().toFloat() - 0.5f) * rough * 0.3f
+            val segs = mutableListOf<FloatArray>()
+            segs.addAll(buildBolt(x1, y1, mx, my, rough / 2, depth - 1))
+            segs.addAll(buildBolt(mx, my, x2, y2, rough / 2, depth - 1))
+            if (Math.random() < 0.4 && depth > 1) {
+                val bx = mx + (Math.random().toFloat() - 0.35f) * 80
+                val by = my + Math.random().toFloat() * 90
+                segs.addAll(buildBolt(mx, my, bx, by, rough / 3, depth - 2))
+            }
+            return segs
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            if (segments.isEmpty() || flashAlpha <= 0f) return
+            val a = flashAlpha
+            // Outer glow
+            paint.strokeWidth = 5f
+            paint.color = Color.argb((a * 80).toInt(), 160, 128, 255)
+            paint.setShadowLayer(18f, 0f, 0f, Color.argb((a * 200).toInt(), 128, 84, 255))
+            segments.forEach { canvas.drawLine(it[0], it[1], it[2], it[3], paint) }
+            // Mid electric line
+            paint.strokeWidth = 2f
+            paint.color = Color.argb((a * 200).toInt(), 210, 190, 255)
+            paint.setShadowLayer(8f, 0f, 0f, Color.argb((a * 180).toInt(), 190, 160, 255))
+            segments.forEach { canvas.drawLine(it[0], it[1], it[2], it[3], paint) }
+            // Bright white core
+            paint.strokeWidth = 0.8f
+            paint.color = Color.argb((a * 255).toInt(), 255, 255, 255)
+            paint.clearShadowLayer()
+            segments.forEach { canvas.drawLine(it[0], it[1], it[2], it[3], paint) }
+        }
+    }
+
     private data class Script(val name: String, val category: String, val description: String)
 
     private inner class ShimmerScanView(context: Context) : View(context) {
