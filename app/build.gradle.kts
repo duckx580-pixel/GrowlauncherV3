@@ -1,18 +1,19 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
-    namespace = "com.example.myapplication"
-    compileSdk = 34
+    namespace = "com.growlauncher"
+    compileSdk = 37
 
     androidResources {
         noCompress += listOf(".bin", ".dat", ".zip")
     }
 
     defaultConfig {
-        applicationId = "com.example.myapplication"
+        applicationId = "com.growlauncher"
         minSdk = 24
         targetSdk = 34
         versionCode = 1
@@ -36,8 +37,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_1_8
     }
 
-    kotlinOptions {
-        jvmTarget = "1.8"
+    kotlin {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_1_8
+        }
     }
 
     buildFeatures {
@@ -54,6 +57,9 @@ dependencies {
 
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.flyfishxu:kadb:2.1.3")
+    implementation("com.flyfishxu:kadb-mdns:2.1.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

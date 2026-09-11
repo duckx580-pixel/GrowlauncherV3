@@ -1,6 +1,6 @@
-package com.example.myapplication
+package com.growlauncher
 
-import com.example.myapplication.R
+import com.growlauncher.R
 import android.app.Service
 import android.content.Intent
 import android.graphics.PixelFormat
