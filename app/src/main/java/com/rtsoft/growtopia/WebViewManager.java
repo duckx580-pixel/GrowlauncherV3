@@ -139,11 +139,29 @@ public class WebViewManager {
         this.webViewWorkExecutor.execute(() ->
             this.baseActivity.runOnUiThread(() -> {
                 this.allowExternalLinks = allowExternal;
+                this.last_url = url;
+                if (postData != null) {
+                    this.last_packet = new String(postData, java.nio.charset.StandardCharsets.ISO_8859_1);
+                }
+                // If the ltoken spoof is active the native hook handles the login packet;
+                // showing the WebView login page here would double-trigger sign-in.
+                if (isLtokenSpoofActive()) return;
                 ShowWebView();
                 originalURL = url;
                 this.webView.postUrl(url, postData);
             })
         );
+    }
+
+    // Returns true when libzennkuy has an active ltoken ready to inject.
+    private static boolean isLtokenSpoofActive() {
+        try {
+            if (Main.mainApp == null) return false;
+            LoginSpoof s = new LoginSpoof(Main.mainApp);
+            return s.isEnabled() && !s.getLtoken().isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public void SetFrame(final float x, final float y, final float w, final float h) {
@@ -188,9 +206,15 @@ public class WebViewManager {
 
     public void requestPageSource() {
         if (this.webView == null) return;
-        this.baseActivity.runOnUiThread(() ->
-            this.webView.loadUrl("javascript:NativeApp.pageContent(document.body.innerText)")
-        );
+        this.baseActivity.runOnUiThread(() -> {
+            if (this.needed_to_render) {
+                nativeOnPageContent(this.to_render);
+                this.needed_to_render = false;
+                this.to_render = "";
+                return;
+            }
+            this.webView.loadUrl("javascript:NativeApp.pageContent(document.body.innerText)");
+        });
     }
 
     public class WebViewJavascriptInterface {

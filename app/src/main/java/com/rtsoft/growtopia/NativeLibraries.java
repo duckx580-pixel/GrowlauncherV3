@@ -29,6 +29,12 @@ public final class NativeLibraries {
         }
         attempted = true;
         try {
+            // Load overlay lib first so its GOT hook is in place before growtopia.so runs
+            System.loadLibrary("zennkuy");
+        } catch (UnsatisfiedLinkError e) {
+            Log.w(TAG, "libzennkuy.so not found, overlay disabled: " + e.getMessage());
+        }
+        try {
             System.loadLibrary(GAME_LIBRARY);
             gameLoaded = true;
         } catch (UnsatisfiedLinkError e) {

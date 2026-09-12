@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
 import android.util.Log;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -65,6 +66,21 @@ public class Main extends SharedActivity {
             NativeAppInterface.OnDeepLinkProcess(data.getSchemeSpecificPart());
         });
         return true;
+    }
+
+    // Native methods in libzennkuy.so
+    public static native void nativeOnTouch(int action, float x, float y);
+    public static native boolean isImGuiCapturingInput();
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        try {
+            nativeOnTouch(ev.getAction(), ev.getX(), ev.getY());
+            if (isImGuiCapturingInput()) return true;
+        } catch (UnsatisfiedLinkError ignored) {
+            // libzennkuy not loaded (debug builds without the lib)
+        }
+        return super.dispatchTouchEvent(ev);
     }
 
     // Input is handled by AppGLSurfaceView and SharedActivity's JNI bridge.
