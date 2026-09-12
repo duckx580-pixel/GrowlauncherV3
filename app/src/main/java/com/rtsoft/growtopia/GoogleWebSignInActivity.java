@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.util.Base64;
 import android.util.Log;
 import android.view.View;
 import android.webkit.JavascriptInterface;
@@ -28,13 +29,21 @@ import org.json.JSONObject;
  *     and extracts the JWT.  This is the preferred path because it yields a
  *     real Google ID token (what the native engine expects).
  *
- *  2. Body-JSON strategy (response_type=code, legacy)
+ *  2. Body-JSON strategy (fallback)
  *     If the redirect URL contains no #id_token, onPageFinished fires and
- *     we inject JS to read document.body.innerText as JSON {"token":"..."}.
- *     This gets a Growtopia session token which may or may not work.
+ *     we inject JS to read document.body.innerText as JSON. Only a field that
+ *     validates as a real Google ID token is used; a Growtopia session token
+ *     is rejected here rather than delivered, because handing native the wrong
+ *     token type is exactly what triggers login "Error: 10".
+ *
+ * Every delivery path is funnelled through {@link #isValidGoogleIdToken}, so a
+ * wrong-audience, replayed, expired, or non-Google token never reaches the
+ * engine.
  */
 public class GoogleWebSignInActivity extends Activity {
     static final String EXTRA_TOKEN = "token";
+    static final String EXTRA_EXPECTED_AUD = "expected_aud";
+    static final String EXTRA_EXPECTED_NONCE = "expected_nonce";
     private static final String TAG = "GoogleWebSignIn";
     private static final String CHROME_UA =
         "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 "
@@ -42,6 +51,8 @@ public class GoogleWebSignInActivity extends Activity {
 
     private WebView webView;
     private boolean finished = false;
+    private String expectedAud;
+    private String expectedNonce;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,6 +64,8 @@ public class GoogleWebSignInActivity extends Activity {
             finish();
             return;
         }
+        expectedAud = getIntent().getStringExtra(EXTRA_EXPECTED_AUD);
+        expectedNonce = getIntent().getStringExtra(EXTRA_EXPECTED_NONCE);
 
         webView = new WebView(this);
         // Disable hardware acceleration to prevent Chrome GPU process SIGSEGV (null ptr in
@@ -136,22 +149,22 @@ public class GoogleWebSignInActivity extends Activity {
         public void onBodyText(String bodyText) {
             if (finished) return;
             try {
-                // Try JSON body first ({"token":"..."})
                 JSONObject json = new JSONObject(bodyText.trim());
-                String token = json.optString("token", "");
-                if (!token.isEmpty()) {
-                    Log.d(TAG, "Got token from body JSON, length=" + token.length());
-                    deliverToken(token);
-                    return;
+                // Prefer the real Google ID token field, then other aliases.
+                // deliverToken re-validates, but choose a candidate that passes
+                // here so a stray "token" field doesn't abort the attempt before
+                // a valid id_token is tried.
+                for (String key : new String[] {"id_token", "token", "loginToken"}) {
+                    String candidate = json.optString(key, "");
+                    if (!candidate.isEmpty()
+                            && isValidGoogleIdToken(candidate, expectedAud, expectedNonce)) {
+                        Log.d(TAG, "Got valid Google ID token from body JSON field '" + key + "'");
+                        deliverToken(candidate);
+                        return;
+                    }
                 }
-                // Try id_token field in JSON
-                String idToken = json.optString("id_token", "");
-                if (!idToken.isEmpty()) {
-                    Log.d(TAG, "Got id_token from body JSON, length=" + idToken.length());
-                    deliverToken(idToken);
-                    return;
-                }
-                Log.e(TAG, "No token field in JSON: " + bodyText.substring(0, Math.min(200, bodyText.length())));
+                Log.e(TAG, "No valid Google ID token in body JSON: "
+                        + bodyText.substring(0, Math.min(200, bodyText.length())));
                 deliverCancel();
             } catch (Exception e) {
                 Log.e(TAG, "Body parse error: " + e.getMessage());
@@ -164,11 +177,69 @@ public class GoogleWebSignInActivity extends Activity {
 
     private void deliverToken(String token) {
         if (finished) return;
+        // Only ever hand back a genuine Google ID token. Delivering anything
+        // else (e.g. the Growtopia session token from the callback page body)
+        // is exactly what makes the native login fail with Error 10, so reject
+        // it here and let the caller report a clean failure instead.
+        if (!isValidGoogleIdToken(token, expectedAud, expectedNonce)) {
+            Log.e(TAG, "Rejected non-Google-ID token (len="
+                    + (token != null ? token.length() : 0) + "); not delivering");
+            deliverCancel();
+            return;
+        }
         finished = true;
         Intent result = new Intent();
         result.putExtra(EXTRA_TOKEN, token);
         setResult(RESULT_OK, result);
         runOnUiThread(this::finish);
+    }
+
+    /**
+     * Verifies {@code token} is a Google-issued OpenID Connect ID token that
+     * Growtopia's server will accept:
+     * <ul>
+     *   <li>three JWT segments;</li>
+     *   <li>{@code iss} is {@code accounts.google.com} (with or without the
+     *       {@code https://} prefix);</li>
+     *   <li>{@code aud} equals the client id we requested;</li>
+     *   <li>{@code nonce} echoes the value we sent (anti-replay);</li>
+     *   <li>{@code exp} is still in the future.</li>
+     * </ul>
+     * A Growtopia session token or an OAuth error page fails all of these.
+     */
+    static boolean isValidGoogleIdToken(String token, String expectedAud, String expectedNonce) {
+        if (token == null || token.isEmpty()) return false;
+        String[] parts = token.split("\\.");
+        if (parts.length != 3) return false;
+        try {
+            byte[] payload = Base64.decode(parts[1], Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
+            JSONObject claims = new JSONObject(new String(payload, java.nio.charset.StandardCharsets.UTF_8));
+
+            String iss = claims.optString("iss", "");
+            if (!"accounts.google.com".equals(iss) && !"https://accounts.google.com".equals(iss)) {
+                Log.e(TAG, "ID token iss mismatch: " + iss);
+                return false;
+            }
+            if (expectedAud != null && !expectedAud.isEmpty()
+                    && !expectedAud.equals(claims.optString("aud", ""))) {
+                Log.e(TAG, "ID token aud mismatch");
+                return false;
+            }
+            if (expectedNonce != null && !expectedNonce.isEmpty()
+                    && !expectedNonce.equals(claims.optString("nonce", ""))) {
+                Log.e(TAG, "ID token nonce mismatch");
+                return false;
+            }
+            long exp = claims.optLong("exp", 0L);
+            if (exp > 0 && exp * 1000L < System.currentTimeMillis()) {
+                Log.e(TAG, "ID token expired");
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "ID token parse failed: " + e.getMessage());
+            return false;
+        }
     }
 
     void deliverCancel() {

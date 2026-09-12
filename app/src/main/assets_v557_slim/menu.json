@@ -1081,8 +1081,7 @@
             "label": "Input ltoken here or get the ltoken with refresh token",
             "placeholder": "tokenxxxxxxxxx",
             "icon": "ContentPaste",
-            "alias": "ltoken_spoof",
-            "hidden": true
+            "alias": "ltoken_spoof"
           },
           {
             "type": "toggle",

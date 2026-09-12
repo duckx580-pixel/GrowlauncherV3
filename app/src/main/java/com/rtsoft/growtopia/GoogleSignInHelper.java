@@ -6,6 +6,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import java.net.URLEncoder;
@@ -40,12 +42,22 @@ public class GoogleSignInHelper {
 
     Activity mainActivity;
 
+    // Records the captured Google token and status for the Login Spoof menu
+    // (google_token / google_logs) and stores device-identity / ltoken values.
+    private final LoginSpoof spoof;
+
     // Saved from RC_ACCOUNT_PICKER so RC_AUTH_CONSENT can retry fetchIdToken
     // even when the consent activity doesn't return KEY_ACCOUNT_NAME.
     private String pendingAccountName = null;
 
+    // The nonce sent to Google in the current sign-in attempt. The returned ID
+    // token must echo it back, otherwise the token is replayed/forged and would
+    // be rejected by Growtopia's server with Error 10.
+    private String pendingNonce = null;
+
     public GoogleSignInHelper(Activity activity) {
         this.mainActivity = activity;
+        this.spoof = new LoginSpoof(activity);
     }
 
     public native void OnSignIn(int code, String token);
@@ -107,15 +119,24 @@ public class GoogleSignInHelper {
         try {
             String nonce = UUID.randomUUID().toString().replace("-", "");
             String state = UUID.randomUUID().toString().replace("-", "");
+            pendingNonce = nonce;
             String url = "https://accounts.google.com/o/oauth2/v2/auth"
                 + "?client_id=" + CLIENT_ID
                 + "&redirect_uri=" + URLEncoder.encode(REDIRECT_URI, "utf-8")
                 + "&response_type=id_token"
                 + "&scope=" + URLEncoder.encode("openid profile email", "utf-8")
                 + "&nonce=" + nonce
-                + "&state=" + state;
+                + "&state=" + state
+                // Force the account chooser so a stale/single session can't
+                // silently return a token for the wrong account.
+                + "&prompt=select_account";
             Intent intent = new Intent(mainActivity, GoogleWebSignInActivity.class);
             intent.putExtra("url", url);
+            // The activity validates the returned ID token against these before
+            // handing it back, so a wrong-type or forged token never reaches
+            // native (which would surface as Error 10).
+            intent.putExtra(GoogleWebSignInActivity.EXTRA_EXPECTED_AUD, CLIENT_ID);
+            intent.putExtra(GoogleWebSignInActivity.EXTRA_EXPECTED_NONCE, nonce);
             mainActivity.startActivityForResult(intent, RC_GOOGLE_WEB);
         } catch (Exception e) {
             Log.e(TAG, "WebView sign-in start failed: " + e.getMessage());
@@ -177,17 +198,41 @@ public class GoogleSignInHelper {
 
     // ── Token delivery on the GL thread ───────────────────────────────────
     private void deliverResult(int code, String token) {
-        GLSurfaceView glView = SharedActivity.mGLView;
-        if (glView != null) {
-            final int c = code;
-            final String t = token;
-            glView.queueEvent(() -> {
-                try {
-                    OnSignIn(c, t);
-                } catch (UnsatisfiedLinkError e) {
-                    Log.w(TAG, "OnSignIn native unavailable: " + e.getMessage());
-                }
-            });
+        // Record what happened for the Login Spoof "Google" menu section.
+        if (code == 0 && token != null && !token.isEmpty()) {
+            spoof.setGoogleToken(token);
+            spoof.setGoogleLogs("Google sign-in OK (token length=" + token.length() + ")");
+        } else {
+            spoof.setGoogleLogs("Google sign-in failed (code=" + code + ")");
         }
+        deliverToGl(code, token, 0);
+    }
+
+    // The GL view may not exist yet when the sign-in activity returns (the
+    // engine tears it down while another activity is on top). Retry briefly so
+    // native always receives OnSignIn instead of the login screen hanging on
+    // "Getting server address..." forever.
+    private static final int MAX_DELIVER_RETRIES = 40; // ~4s at 100ms
+    private final Handler deliverHandler = new Handler(Looper.getMainLooper());
+
+    private void deliverToGl(int code, String token, int attempt) {
+        GLSurfaceView glView = SharedActivity.mGLView;
+        if (glView == null) {
+            if (attempt >= MAX_DELIVER_RETRIES) {
+                Log.w(TAG, "GL view never became available; dropping OnSignIn(code=" + code + ")");
+                return;
+            }
+            deliverHandler.postDelayed(() -> deliverToGl(code, token, attempt + 1), 100);
+            return;
+        }
+        final int c = code;
+        final String t = token;
+        glView.queueEvent(() -> {
+            try {
+                OnSignIn(c, t);
+            } catch (UnsatisfiedLinkError e) {
+                Log.w(TAG, "OnSignIn native unavailable: " + e.getMessage());
+            }
+        });
     }
 }
