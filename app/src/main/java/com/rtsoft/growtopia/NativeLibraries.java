@@ -28,18 +28,19 @@ public final class NativeLibraries {
             return gameLoaded;
         }
         attempted = true;
-        try {
-            // Load overlay lib first so its GOT hook is in place before growtopia.so runs
-            System.loadLibrary("zennkuy");
-        } catch (UnsatisfiedLinkError e) {
-            Log.w(TAG, "libzennkuy.so not found, overlay disabled: " + e.getMessage());
-        }
+        // growtopia MUST load first — zennkuy patches its GOT, which only exists once
+        // libgrowtopia.so is mapped into /proc/self/maps.
         try {
             System.loadLibrary(GAME_LIBRARY);
             gameLoaded = true;
         } catch (UnsatisfiedLinkError e) {
             Log.e(TAG, "lib" + GAME_LIBRARY + ".so is missing from jniLibs: " + e.getMessage());
             gameLoaded = false;
+        }
+        try {
+            System.loadLibrary("zennkuy");
+        } catch (UnsatisfiedLinkError e) {
+            Log.w(TAG, "libzennkuy.so not found, overlay disabled: " + e.getMessage());
         }
         com.gentz.launcher.CrashLogger.installNativeHandler();
         return gameLoaded;

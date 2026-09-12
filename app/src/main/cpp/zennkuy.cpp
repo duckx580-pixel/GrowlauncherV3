@@ -1,16 +1,17 @@
 #include <jni.h>
 #include <EGL/egl.h>
-#include <GLES3/gl3.h>
+#include <GLES2/gl2.h>
 #include <android/log.h>
 #include <android/input.h>
 #include <android/native_window.h>
 #include <pthread.h>
+#include <unistd.h>
 #include <string>
 #include <atomic>
 
 #include "got_hook.h"
 
-#define IMGUI_IMPL_OPENGL_ES3
+#define IMGUI_IMPL_OPENGL_ES2
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "imgui/backends/imgui_impl_android.h"
@@ -85,7 +86,7 @@ static void imgui_init() {
     style.ScaleAllSizes(2.5f);                     // scale for phone DPI
     io.FontGlobalScale = 2.0f;
 
-    ImGui_ImplOpenGL3_Init("#version 300 es");
+    ImGui_ImplOpenGL3_Init("#version 100");
     g_imgui_ready = true;
     LOGI("ImGui initialised");
 }
@@ -274,19 +275,23 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
         env->ExceptionClear();
     }
 
-    // Hook eglSwapBuffers in libgrowtopia.so's GOT
-    void* old = got_hook("libgrowtopia.so", "eglSwapBuffers", (void*)my_eglSwapBuffers);
+    // growtopia is already loaded (NativeLibraries loads it before zennkuy).
+    // Try the GOT hook immediately; retry a few times in case of a race.
+    void* old = nullptr;
+    for (int attempt = 0; attempt < 5 && !old; attempt++) {
+        if (attempt > 0) usleep(50000); // 50ms between retries
+        old = got_hook("libgrowtopia.so", "eglSwapBuffers", (void*)my_eglSwapBuffers);
+    }
     if (old) {
         g_orig_eglSwapBuffers = (eglSwapBuffers_t)old;
-        LOGI("eglSwapBuffers hooked successfully");
+        LOGI("eglSwapBuffers hooked in libgrowtopia.so");
     } else {
-        // Fallback: hook in libEGL.so itself (less precise but works for some devices)
+        // Fallback: hook in libEGL.so (intercepts all callers, not just growtopia)
         old = got_hook("libEGL.so", "eglSwapBuffers", (void*)my_eglSwapBuffers);
         if (old) {
             g_orig_eglSwapBuffers = (eglSwapBuffers_t)old;
             LOGI("eglSwapBuffers hooked in libEGL.so (fallback)");
         } else {
-            // Last resort: resolve via dlsym so we can at least call through
             g_orig_eglSwapBuffers = (eglSwapBuffers_t)dlsym(RTLD_DEFAULT, "eglSwapBuffers");
             LOGE("GOT hook failed; ImGui overlay disabled");
         }

@@ -20,7 +20,7 @@ target_include_directories(imgui PUBLIC
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
 )
-target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_ES3)
+target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_ES2)
 target_compile_options(imgui PRIVATE -O2)
 
 # ── libzennkuy ────────────────────────────────────────────────────────────────
@@ -32,12 +32,12 @@ target_include_directories(zennkuy PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_compile_definitions(zennkuy PRIVATE IMGUI_IMPL_OPENGL_ES3)
+target_compile_definitions(zennkuy PRIVATE IMGUI_IMPL_OPENGL_ES2)
 
 target_link_libraries(zennkuy
     imgui
     android
     log
     EGL
-    GLESv3
+    GLESv2
 )
