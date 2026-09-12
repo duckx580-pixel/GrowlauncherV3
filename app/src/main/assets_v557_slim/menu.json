@@ -1,0 +1,3087 @@
+[
+  {
+    "category": "Menu",
+    "icon": "Gamepad",
+    "sub_category": [
+      {
+        "sub_name": "Basic",
+        "description": "Basic cheats for growtopia.",
+        "icon": "Handyman",
+        "menu": [
+          {
+            "type": "labelapp",
+            "icon": "DirectionsRun",
+            "text": "Player Movement",
+            "description": "Basic player movement menu."
+          },
+          {
+            "text": "Antiban",
+            "description": "Basic antiban, this will prevent basic anticheat from growtopia. Other antiban will always be applied automatically in other features.",
+            "type": "toggle",
+            "default": true
+          },
+          {
+            "text": "Protect Packet",
+            "alias": "m_antiban_protect_packet",
+            "description": "Block all suspicious non standar packet to be send into server. Disable this when you are in Private Server",
+            "type": "toggle",
+            "default": true
+          },
+          {
+            "text": "Antibounce",
+            "description": "Prevent death from deadly tiles.",
+            "type": "toggle",
+            "default": false,
+            "expandable": true,
+            "list_child": [
+              {
+                "text": "Antiban V2",
+                "description": "Antiban for antibounce, this will keep you save from ban when parkour using antibounce.",
+                "type": "toggle",
+                "default": true
+              },
+              {
+                "type":"tooltip",
+                "icon": "note_icon",
+                "text":"Effect",
+                "support_text": "You can't punch people when Antiban V2 is on, people will see you like Falling"
+              }
+            ]
+          },
+          {
+            "text": "Growz V2",
+            "description": "Give more speed to your player",
+            "type": "toggle",
+            "default": false,
+            "expandable": true,
+            "list_child": [
+              {
+                "text": "Speed Growz",
+                "type": "slider",
+                "min": 0,
+                "max": 8,
+                "use_dot": true,
+                "step":  7,
+                "default": 3,
+                "alias": "speed_growz"
+              }
+            ]
+          },
+          {
+            "text": "Moonwalk",
+            "type": "toggle",
+            "default": false,
+            "description": "Allows moving backward while facing forward.",
+            "alias": "cheat_config_moonwalk"
+          },
+          {
+            "text": "No Walk",
+            "type": "toggle",
+            "default": false,
+            "description": "Disable move animation, this is not visual",
+            "alias": "cheat_config_nowalk"
+          },
+          {
+            "text": "Fast Fall",
+            "type": "toggle",
+            "default": false,
+            "description": "Fall more faster",
+            "alias": "cheat_config_fastfall",
+            "expandable": true,
+            "list_child": [
+              {
+                "text": "Speed Fall",
+                "type": "slider",
+                "min": 0,
+                "max": 15,
+                "default": 5,
+                "alias": "cheat_config_fastfall_speed"
+              }
+            ]
+          },
+          {
+            "text": "Slow Fall",
+            "type": "toggle",
+            "default": false,
+            "description": "Fall more slower",
+            "alias": "cheat_config_slowfall"
+          },
+          {
+            "type": "labelapp",
+            "icon": "ThumbUpOffAlt",
+            "text": "Ability",
+            "description": "Extends player ability."
+          },
+          {
+            "text": "ModFly",
+            "description": "Fly like creative mode",
+            "type": "toggle",
+            "default": false
+          },
+          {
+            "text": "Anti Lava",
+            "description": "Prevents death from lava, but does not prevent contact with lava.",
+            "type": "toggle",
+            "default": false
+          },
+          {
+            "text": "Anti Respawn",
+            "type": "toggle",
+            "default": false,
+            "description": "Respawn in current pos, but this can be dangerous",
+            "alias": "cheat_config_antirespawn"
+          },
+          {
+            "text": "See Locked Door",
+            "description": "See label of locked door",
+            "type": "toggle",
+            "default": false
+          },
+          {
+            "text": "NoClip and Ghost",
+            "description": "Noclip allows you move throught blocks, visual and other player cant see",
+            "alias": "noclip_and_ghost",
+            "type": "toggle",
+            "default": false,
+            "expandable": true,
+            "list_child": [
+              {
+                "text": "Developer Mode",
+                "type": "toggle",
+                "description": "Allows you place and break without owner permission, also this is visual",
+                "alias": "developer_mode",
+                "default": false,
+                "autosave": true
+              },
+              {
+                "text": "Touch Mode",
+                "type": "toggle",
+                "description": "Allows you to activate a block without owner permission, also this is visual",
+                "alias": "activer_mode",
+                "default": false,
+                "autosave": true
+              },
+              {
+                "text": "Don't disable Ghost",
+                "type": "tooltip",
+                "support_text": "Noclip in real Growtopia need ghost to avoid Autoban..."
+              }
+            ]
+          },
+          {
+            "text": "Visual Invis V2",
+            "description": "Visual invisible",
+            "type": "toggle",
+            "default": false,
+            "alias": "features_invis_v2"
+          },
+          {
+            "text": "Night Vision",
+            "description": "Leveling up your eyes and dark spot now is being light spot",
+            "type": "toggle",
+            "default": false
+          },
+          {
+            "text": "Can See Ghost",
+            "description": "Enhances vision, turning dark areas into light",
+            "type": "toggle",
+            "default": false
+          },
+          {
+            "type": "toggle",
+            "text": "See Inside Chest",
+            "description": "Allows you to see items inside closed chest",
+            "default": false,
+            "alias": "cheat_basic_seeinside_chest"
+          },
+          {
+            "text": "See Fruit",
+            "type": "toggle",
+            "description": "Reveals fruits on tree",
+            "default": false
+          },
+          {
+            "text":"Fast Take",
+            "type":"toggle",
+            "description": "Instantly picks up items without delay",
+            "default": false
+          },
+          {
+            "text": "No Name",
+            "type": "toggle",
+            "default": false,
+            "description": "Hide all name in world",
+            "alias": "cheat_config_noname"
+          },
+          {
+            "text": "Anti State",
+            "type": "toggle",
+            "default": false,
+            "description": "Prevents state changes applied by the game.",
+            "alias": "cheat_anti_state"
+          },
+          {
+            "text": "Skip update items",
+            "type": "toggle",
+            "default": false,
+            "description": "Skips item update processing to reduce sync overhead.",
+            "alias": "cheat_skip_update_item"
+          }
+        ]
+      },
+      {
+        "sub_name": "Visual",
+        "description": "A cheat that only you can see",
+        "icon": "RemoveRedEye",
+        "menu": [
+          {
+            "type": "labelapp",
+            "icon": "AllInbox",
+            "text": "Inventory",
+            "description": "Add item to inventory."
+          },
+          {
+            "type":"item_picker",
+            "text":"Item to add",
+            "item": "Blank",
+            "default": "Blank",
+            "alias": "visual_inventory_itemid"
+          },
+          {
+            "type": "dialog",
+            "text": "Settings",
+            "support_text": "Click to open settings",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Settings",
+                "icon": "AllInbox"
+              },
+              {
+                "type": "input_int",
+                "text": "Amount to add",
+                "default": "1",
+                "label": "Amount to add into inventory",
+                "placeholder": "200",
+                "icon": "SettingsInputComponent",
+                "alias": "visual_inventory_amount"
+              }
+            ]
+          },
+          {
+            "type": "button",
+            "text": "Add to inventory",
+            "alias": "visual_inventory_add"
+          },
+          {
+            "type": "tooltip",
+            "text": "/finditem <name>",
+            "support_text": "To find item in growtopia, and you can use it if you want.",
+            "icon": "Bolt"
+          },
+          {
+            "type": "tooltip",
+            "text": "/setname <name>",
+            "support_text": "To rename your growid visually.",
+            "icon": "Bolt"
+          },
+          {
+            "type": "tooltip",
+            "text": "/setpunch <id>",
+            "support_text": "To set your punch id visually.",
+            "icon": "Bolt"
+          },
+          {
+            "type": "labelapp",
+            "icon": "Interests",
+            "text": "Clothes",
+            "description": "Use clothes visually and free. use /finditem <clothes> and click the target clothes to wear."
+          },
+          {
+            "type": "toggle",
+            "alias": "clothes_config_active",
+            "text": "Keep visual clothes",
+            "default": false
+          },
+          {
+            "type": "dialog",
+            "text": "Visual name",
+            "support_text": "Click to setname",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Enter your name",
+                "description": "Name is only visual and only visible on you.",
+                "icon": "AccountCircle"
+              },
+              {
+                "type": "input_string",
+                "text": "Name",
+                "default": "``Growtopian of Legend``",
+                "alias": "config_name_visual",
+                "label": "Name",
+                "placeholder": "Growtopian",
+                "icon": "PersonPinCircle"
+              },
+              {
+                "type": "button",
+                "text": "Set name",
+                "alias": "config_refresh_name"
+              }
+            ]
+          },
+          {
+            "type": "toggle",
+            "alias": "name_config_active",
+            "text": "Keep visual name",
+            "default": false
+          },
+          {
+            "type": "toggle",
+            "alias": "punch_config_active",
+            "text": "Keep visual punch",
+            "default": false
+          },
+          {
+            "type": "simple_display",
+            "icon": "Checkroom",
+            "text": "List clothes",
+            "description": "A list visual clothes. Click to unequip",
+            "alias": "visual_clothes_list",
+            "default": "[]"
+          }
+        ]
+      },
+      {
+        "sub_name": "FindPath",
+        "icon": "Route",
+        "description": "Teleport to target block",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "FindPath",
+            "icon": "Polyline",
+            "description": "Teleport to target block, use wrench and click target. You will be automatically teleported."
+          },
+          {
+            "text": "FindPath",
+            "description": "Teleport to target block, use the findpath item and click target tile. You will be automatically teleported.",
+            "type": "toggle",
+            "default": false,
+            "expandable": true,
+            "always_expand": true,
+            "list_child": [
+              {
+                "type":"item_picker",
+                "text":"FindPath",
+                "item": "Wrench",
+                "default": "Wrench",
+                "alias": "findpath_config_item"
+              },
+              {
+                "type": "slider",
+                "text": "Block jump",
+                "min": 1,
+                "max": 8,
+                "default": 8,
+                "alias": "findpath_config_blockjump"
+              },
+              {
+                "type": "toggle",
+                "text": "Teleport on path",
+                "description": "So your player will not placing incorrect packet position.",
+                "default": true,
+                "alias": "findpath_config_teleport_path"
+              },
+              {
+                "type": "toggle",
+                "text": "Debug paths",
+                "default": false,
+                "alias": "findpath_config_debug_paths"
+              },
+              {
+                "type": "toggle",
+                "text": "Debug current location",
+                "default": false,
+                "alias": "findpath_config_current_loc"
+              },
+              {
+                "type": "toggle",
+                "text": "Overclock",
+                "description": "Make the teleport is more faster, but use it correctly.",
+                "alias": "findpath_config_overclock",
+                "default": true
+              },
+              {
+                "type":"tooltip",
+                "icon": "tips_icon",
+                "text":"Tips",
+                "support_text": "Don't spam if the blocks is about 500 blocks teleport"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "sub_name": "Fast",
+        "icon": "FastForward",
+        "description": "Faster abilty for action",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Actions",
+            "description": "Faster action for time saving",
+            "icon": "Build"
+          },
+          {
+            "type": "toggle",
+            "text": "Fast Drop",
+            "description": "Automatically drop item when you trying to drop it.",
+            "alias": "cheat_config_fastdrop_active",
+            "default": false
+          },
+          {
+            "type": "dialog",
+            "text": "Fast drop settings",
+            "support_text": "Click to open fast drop settings.",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Fast drop settings",
+                "description": "Settings for fast drop",
+                "icon": "Build"
+              },
+              {
+                "type": "toggle",
+                "text": "Custom count",
+                "alias": "cheat_config_fastdrop_custom"
+              },
+              {
+                "type": "input_int",
+                "text": "Count to drop",
+                "default": "200",
+                "label": "Count",
+                "placeholder": "Count",
+                "icon": "Edit",
+                "alias": "cheat_config_fastdrop_count"
+              }
+            ]
+          },
+          {
+            "type": "toggle",
+            "text": "Fast Trash",
+            "description": "Automatically trash item when you trying to trash it.",
+            "alias": "cheat_config_fasttrash_active",
+            "default": false
+          },
+          {
+            "type": "dialog",
+            "text": "Fast trash settings",
+            "support_text": "Click to open fast trash settings.",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Fast trash settings",
+                "description": "Settings for fast trash",
+                "icon": "Delete"
+              },
+              {
+                "type": "toggle",
+                "text": "Custom count",
+                "alias": "cheat_config_fasttrash_custom"
+              },
+              {
+                "type": "input_int",
+                "text": "Count to drop",
+                "default": "200",
+                "label": "Count",
+                "placeholder": "Count",
+                "icon": "Edit",
+                "alias": "cheat_config_fasttrash_count"
+              }
+            ]
+          },
+          {
+            "type": "label",
+            "text": "Vending"
+          },
+          {
+            "type": "toggle",
+            "text": "Fast Buy",
+            "description": "Automatically buy item in vend when you wrench it",
+            "alias": "cheat_config_fastbuy_active",
+            "default": false
+          },
+          {
+            "type": "dialog",
+            "text": "Fast buy settings",
+            "support_text": "Click to open fast buy settings.",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Fast buy settings",
+                "description": "Settings for fast buy",
+                "icon": "AttachMoney"
+              },
+              {
+                "type": "toggle",
+                "text": "Custom count",
+                "alias": "cheat_config_fastbuy_custom"
+              },
+              {
+                "type": "input_int",
+                "text": "Amount to buy",
+                "default": "200",
+                "label": "Count",
+                "placeholder": "Amount",
+                "icon": "Edit",
+                "alias": "cheat_config_fastbuy_amount"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "description": "Extra Sensory Perception",
+        "icon": "AutoAwesome",
+        "menu": [
+          {
+            "type": "labelapp",
+            "icon": "AutoAwesome",
+            "text": "ESP",
+            "description": "Draw a line or bounding box around entities"
+          },
+          {
+            "type": "toggle",
+            "text": "Player",
+            "default": false,
+            "alias": "cheat_esp_player",
+            "description": "Draw line and box between your player to others."
+          },
+          {
+            "alias": "cheat_esp_item",
+            "default": false,
+            "description": "Draw line and box between your player to items.",
+            "text": "Item",
+            "type": "toggle"
+          },
+          {
+            "type": "toggle",
+            "text": "Ghost",
+            "default": false,
+            "expandable": true,
+            "alias": "cheat_esp_ghost",
+            "description": "Draw line and box between your player to ghosts.",
+            "list_child": [
+              {
+                "type": "toggle",
+                "text": "Force draw all types",
+                "default": false,
+                "alias": "cheat_esp_ghost_force",
+                "description": "Force draw all ghost types"
+              }
+            ]
+          }
+        ],
+        "sub_name": "ESP"
+      },
+      {
+        "sub_name": "Extract",
+        "description": "Extract some floating items in tile.",
+        "icon": "SwipeDown",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Dynamo Extractor",
+            "description": "Extract some floating items in tile.",
+            "icon": "SwipeDown"
+          },
+          {
+            "type": "toggle_button",
+            "text": "Enable Dynamo Extrator",
+            "alias": "dynamo_start"
+          },
+          {
+            "type": "tooltip",
+            "icon": "tips_icon",
+            "text": "How to use ?",
+            "support_text": "After enable the feature, you must trigger it by wrenching dropped items."
+          }
+        ]
+      },
+      {
+        "sub_name": "Info",
+        "icon": "RawOn",
+        "description": "Display raw information",
+        "menu": [
+          {
+            "type": "simple_display",
+            "icon": "Commit",
+            "text": "List raw information local player",
+            "description": "A list raw information about current local player.",
+            "alias": "display_list_netavatar_coordinate",
+            "default": "[]"
+          },
+          {
+            "type": "button",
+            "text": "Refresh",
+            "alias": "rawinfo_netavatarlocal"
+          }
+        ]
+      },
+      {
+        "sub_name": "Debug",
+        "icon": "BugReport",
+        "description": "Debug the game, this is usefull when you creating lua scripts.",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Tile debugger",
+            "icon": "Apps",
+            "description": "Show information about last punched tile."
+          },
+          {
+            "type": "toggle",
+            "text": "Enable",
+            "description": "Punch tile to debug.",
+            "alias": "debug_tile"
+          },
+          {
+            "type": "body",
+            "alias": "debug_tile_log",
+            "text": "-"
+          },
+          {
+            "type": "labelapp",
+            "text": "Packet Debugger",
+            "icon": "BugReport",
+            "description": "Capture and filter packets by type and string. Max 200 entries per category."
+          },
+          {
+            "text": "Text Packet",
+            "type": "toggle",
+            "description": "Capture outgoing text packets (action|input, etc).",
+            "alias": "debug_text_packet",
+            "default": false,
+            "expandable": true,
+            "list_child": [
+              {
+                "type": "dialog",
+                "text": "Filter Settings",
+                "support_text": "Click to set type and string filters",
+                "menu": [
+                  {
+                    "type": "labelapp",
+                    "text": "Text Packet Filter",
+                    "description": "Set filters for text packet capture",
+                    "icon": "FilterList"
+                  },
+                  {
+                    "type": "input_int",
+                    "text": "Filter by type",
+                    "default": "-1",
+                    "label": "Packet type (-1 = all)",
+                    "placeholder": "-1",
+                    "icon": "FilterList",
+                    "alias": "debug_sendpacket_type_filter"
+                  },
+                  {
+                    "type": "input_string",
+                    "text": "Filter by string",
+                    "default": "",
+                    "label": "String to search in packet",
+                    "placeholder": "action|input",
+                    "icon": "Search",
+                    "alias": "debug_sendpacket_str_filter"
+                  }
+                ]
+              },
+              {
+                "type": "dialog",
+                "text": "View Logs",
+                "support_text": "Click to view captured text packets",
+                "menu": [
+                  {
+                    "type": "labelapp",
+                    "text": "Text Packet Logs",
+                    "description": "Captured text packets (filtered). Click item to copy.",
+                    "icon": "Commit"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Clear logs",
+                    "alias": "debug_sendpacket_clear"
+                  },
+                  {
+                    "type": "input_string",
+                    "text": "Selected log",
+                    "default": "",
+                    "label": "Full packet text",
+                    "placeholder": "Click a log entry above to view here",
+                    "icon": "ContentPaste",
+                    "alias": "debug_sendpacket_selected",
+                    "multiline": true,
+                    "line_count": 8
+                  },
+                  {
+                    "type": "simple_display",
+                    "icon": "Commit",
+                    "text": "Logs",
+                    "description": "Click item to view full text.",
+                    "alias": "debug_sendpacket_list",
+                    "default": "[]"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Copy to clipboard",
+                    "alias": "debug_sendpacket_copy"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "text": "Raw Packet",
+            "type": "toggle",
+            "description": "Capture outgoing raw tank packets (TankPacketStruct).",
+            "alias": "debug_raw_packet",
+            "default": false,
+            "expandable": true,
+            "list_child": [
+              {
+                "type": "dialog",
+                "text": "Filter Settings",
+                "support_text": "Click to set type and string filters",
+                "menu": [
+                  {
+                    "type": "labelapp",
+                    "text": "Raw Packet Filter",
+                    "description": "Set filters for raw packet capture",
+                    "icon": "FilterList"
+                  },
+                  {
+                    "type": "input_int",
+                    "text": "Filter by type",
+                    "default": "-1",
+                    "label": "Packet type (-1 = all)",
+                    "placeholder": "-1",
+                    "icon": "FilterList",
+                    "alias": "debug_rawpacket_type_filter"
+                  },
+                  {
+                    "type": "input_string",
+                    "text": "Filter by string",
+                    "default": "",
+                    "label": "String to search in packet",
+                    "placeholder": "packetType",
+                    "icon": "Search",
+                    "alias": "debug_rawpacket_str_filter"
+                  }
+                ]
+              },
+              {
+                "type": "dialog",
+                "text": "View Logs",
+                "support_text": "Click to view captured raw packets",
+                "menu": [
+                  {
+                    "type": "labelapp",
+                    "text": "Raw Packet Logs",
+                    "description": "Captured raw packets (filtered). Click item to copy.",
+                    "icon": "Commit"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Clear logs",
+                    "alias": "debug_rawpacket_clear"
+                  },
+                  {
+                    "type": "input_string",
+                    "text": "Selected log",
+                    "default": "",
+                    "label": "Full packet text",
+                    "placeholder": "Click a log entry above to view here",
+                    "icon": "ContentPaste",
+                    "alias": "debug_rawpacket_selected",
+                    "multiline": true,
+                    "line_count": 8
+                  },
+                  {
+                    "type": "simple_display",
+                    "icon": "Commit",
+                    "text": "Logs",
+                    "description": "Click item to view full text.",
+                    "alias": "debug_rawpacket_list",
+                    "default": "[]"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Copy to clipboard",
+                    "alias": "debug_rawpacket_copy"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "text": "OnVariant",
+            "type": "toggle",
+            "description": "Capture incoming variant function calls from server.",
+            "alias": "debug_on_variant",
+            "default": false,
+            "expandable": true,
+            "list_child": [
+              {
+                "type": "dialog",
+                "text": "Filter Settings",
+                "support_text": "Click to set variant name and string filters",
+                "menu": [
+                  {
+                    "type": "labelapp",
+                    "text": "OnVariant Filter",
+                    "description": "Set filters for variant capture",
+                    "icon": "FilterList"
+                  },
+                  {
+                    "type": "input_string",
+                    "text": "Filter by variant name",
+                    "default": "",
+                    "label": "Variant function name (e.g OnConsoleMessage)",
+                    "placeholder": "OnConsoleMessage",
+                    "icon": "FilterList",
+                    "alias": "debug_variant_name_filter"
+                  },
+                  {
+                    "type": "input_string",
+                    "text": "Filter by string",
+                    "default": "",
+                    "label": "String to search in variant data",
+                    "placeholder": "",
+                    "icon": "Search",
+                    "alias": "debug_variant_str_filter"
+                  }
+                ]
+              },
+              {
+                "type": "dialog",
+                "text": "View Logs",
+                "support_text": "Click to view captured variant calls",
+                "menu": [
+                  {
+                    "type": "labelapp",
+                    "text": "OnVariant Logs",
+                    "description": "Captured variant calls (filtered). Click item to copy.",
+                    "icon": "Commit"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Clear logs",
+                    "alias": "debug_variant_clear"
+                  },
+                  {
+                    "type": "input_string",
+                    "text": "Selected log",
+                    "default": "",
+                    "label": "Full variant text",
+                    "placeholder": "Click a log entry above to view here",
+                    "icon": "ContentPaste",
+                    "alias": "debug_variant_selected",
+                    "multiline": true,
+                    "line_count": 8
+                  },
+                  {
+                    "type": "simple_display",
+                    "icon": "Commit",
+                    "text": "Logs",
+                    "description": "Click item to view full text.",
+                    "alias": "debug_variant_list",
+                    "default": "[]"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Copy to clipboard",
+                    "alias": "debug_variant_copy"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "text": "GameTankUpdate",
+            "type": "toggle",
+            "description": "Capture incoming game tank update packets.",
+            "alias": "debug_tankupdate",
+            "default": false,
+            "expandable": true,
+            "list_child": [
+              {
+                "type": "dialog",
+                "text": "Filter Settings",
+                "support_text": "Click to set type and string filters",
+                "menu": [
+                  {
+                    "type": "labelapp",
+                    "text": "GameTankUpdate Filter",
+                    "description": "Set filters for tank update capture",
+                    "icon": "FilterList"
+                  },
+                  {
+                    "type": "input_int",
+                    "text": "Filter by type",
+                    "default": "-1",
+                    "label": "Packet type (-1 = all)",
+                    "placeholder": "-1",
+                    "icon": "FilterList",
+                    "alias": "debug_tankupdate_type_filter"
+                  },
+                  {
+                    "type": "input_string",
+                    "text": "Filter by string",
+                    "default": "",
+                    "label": "String to search in packet",
+                    "placeholder": "",
+                    "icon": "Search",
+                    "alias": "debug_tankupdate_str_filter"
+                  }
+                ]
+              },
+              {
+                "type": "dialog",
+                "text": "View Logs",
+                "support_text": "Click to view captured tank update packets",
+                "menu": [
+                  {
+                    "type": "labelapp",
+                    "text": "GameTankUpdate Logs",
+                    "description": "Captured tank update packets (filtered). Click item to copy.",
+                    "icon": "Commit"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Clear logs",
+                    "alias": "debug_tankupdate_clear"
+                  },
+                  {
+                    "type": "input_string",
+                    "text": "Selected log",
+                    "default": "",
+                    "label": "Full packet text",
+                    "placeholder": "Click a log entry above to view here",
+                    "icon": "ContentPaste",
+                    "alias": "debug_tankupdate_selected",
+                    "multiline": true,
+                    "line_count": 8
+                  },
+                  {
+                    "type": "simple_display",
+                    "icon": "Commit",
+                    "text": "Logs",
+                    "description": "Click item to view full text.",
+                    "alias": "debug_tankupdate_list",
+                    "default": "[]"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Copy to clipboard",
+                    "alias": "debug_tankupdate_copy"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "text": "Value Debugger",
+            "type": "toggle",
+            "description": "Capture internal OnSetValue calls (menu updates).",
+            "alias": "debug_value_debugger",
+            "default": false,
+            "expandable": true,
+            "list_child": [
+              {
+                "type": "dialog",
+                "text": "Filter Settings",
+                "support_text": "Click to set string filter",
+                "menu": [
+                  {
+                    "type": "labelapp",
+                    "text": "Value Debugger Filter",
+                    "description": "Set string filter for OnSetValue capture",
+                    "icon": "FilterList"
+                  },
+                  {
+                    "type": "input_string",
+                    "text": "Filter by string",
+                    "default": "",
+                    "label": "String to search in name/value",
+                    "placeholder": "",
+                    "icon": "Search",
+                    "alias": "debug_value_str_filter"
+                  }
+                ]
+              },
+              {
+                "type": "dialog",
+                "text": "View Logs",
+                "support_text": "Click to view captured value changes",
+                "menu": [
+                  {
+                    "type": "labelapp",
+                    "text": "Value Debugger Logs",
+                    "description": "Captured OnSetValue calls (filtered). Click item to copy.",
+                    "icon": "Commit"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Clear logs",
+                    "alias": "debug_value_clear"
+                  },
+                  {
+                    "type": "input_string",
+                    "text": "Selected log",
+                    "default": "",
+                    "label": "Full entry text",
+                    "placeholder": "Click a log entry above to view here",
+                    "icon": "ContentPaste",
+                    "alias": "debug_value_selected",
+                    "multiline": true,
+                    "line_count": 8
+                  },
+                  {
+                    "type": "simple_display",
+                    "icon": "Commit",
+                    "text": "Logs",
+                    "description": "Click item to view full text.",
+                    "alias": "debug_value_list",
+                    "default": "[]"
+                  },
+                  {
+                    "type": "button",
+                    "text": "Copy to clipboard",
+                    "alias": "debug_value_copy"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "sub_name": "Login Spoof",
+        "icon": "Key",
+        "description": "Setting for your login information",
+        "menu": [
+          {
+            "type": "label",
+            "text": "Login Spoof"
+          },
+          {
+            "type": "input_string",
+            "text": "Login directly with ltoken, if ltoken is manually inputted you must configure the MAC and RID",
+            "default": "",
+            "label": "Input ltoken here or get the ltoken with refresh token",
+            "placeholder": "tokenxxxxxxxxx",
+            "icon": "ContentPaste",
+            "alias": "ltoken_spoof",
+            "hidden": true
+          },
+          {
+            "type": "toggle",
+            "text": "Enable ltoken login",
+            "alias": "ltoken_spoof_enable"
+          },
+          {
+            "type": "button",
+            "text": "Clear ltoken",
+            "alias": "ltoken_clear"
+          },
+          {
+            "type": "label",
+            "text": "Device Identity"
+          },
+          {
+            "type": "dropdown",
+            "value": "[\"Android\", \"Windows\"]",
+            "default": 1,
+            "alias": "login_platform",
+            "text": "Platform",
+            "description": "Login platform"
+          },
+          {
+            "type": "input_string",
+            "text": "MAC Address",
+            "default": "",
+            "label": "MAC Address",
+            "placeholder": "BE:9C:F8:99:E0:D7",
+            "icon": "Router",
+            "alias": "login_mac"
+          },
+          {
+            "type": "button",
+            "text": "Generate MAC",
+            "alias": "login_generate_mac"
+          },
+          {
+            "type": "input_string",
+            "text": "RID",
+            "default": "",
+            "label": "RID",
+            "placeholder": "0258AD8DE6D8F487027AEC993813AF16",
+            "icon": "Fingerprint",
+            "alias": "login_rid"
+          },
+          {
+            "type": "button",
+            "text": "Generate RID",
+            "alias": "login_generate_rid"
+          },
+          {
+            "type": "input_string",
+            "text": "WK",
+            "default": "",
+            "label": "WK",
+            "placeholder": "0258AD8DE6D8F487027AEC993813AF16",
+            "icon": "Key",
+            "alias": "login_wk"
+          },
+          {
+            "type": "button",
+            "text": "Generate WK",
+            "alias": "login_generate_wk"
+          },
+          {
+            "type": "dialog",
+            "text": "Refresh Token",
+            "support_text": "Input your refresh token here",
+            "menu": [
+              {
+                "type": "input_string",
+                "text": "Refresh Token",
+                "default": "",
+                "label": "Input refresh token here",
+                "placeholder": "....",
+                "icon": "ContentPaste",
+                "alias": "ltoken_refresh_token"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "sub_name": "Google",
+        "icon": "AccountCircle",
+        "description": "Growtopia login google",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "How to use ?",
+            "description": "Click login token and you will be redirected to chrome. After login google in chrome, select growlauncher to back.",
+            "icon": "AccountCircle"
+          },
+          {
+            "type": "label",
+            "text": "Logs"
+          },
+          {
+            "type": "body",
+            "text": "Google Logs",
+            "alias": "google_logs",
+            "value": "Not started."
+          },
+          {
+            "type": "label",
+            "text": "Token"
+          },
+          {
+            "type": "body",
+            "text": "Google Token",
+            "alias": "google_token",
+            "value": "-"
+          },
+          {
+            "type": "button",
+            "text": "Clear Token",
+            "alias": "google_clear_token"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "category": "Automation",
+    "icon": "Sync",
+    "sub_category": [
+      {
+        "sub_name": "Spammer",
+        "icon": "Message",
+        "description": "Automatically send chat without typing it manually.",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Spammer",
+            "description": "Automatically send chat without typing it manually. This supports multiline spam",
+            "alias": "ignore_spammer",
+            "icon": "QuestionAnswer"
+          },
+          {
+            "type": "dialog",
+            "text": "Spammer Setting",
+            "support_text": "Click to open settings",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Spammer",
+                "description": "Automatically send chat without typing it manually",
+                "alias": "ignore_spammer",
+                "icon": "QuestionAnswer"
+              },
+              {
+                "type": "input_int",
+                "text": "Delay spam (ms)",
+                "default": "2000",
+                "label": "milliseconds",
+                "placeholder": "2000",
+                "icon": "SpeakerNotes",
+                "alias": "spammer_config_delay"
+              },
+              {
+                "type": "toggle",
+                "text": "Auto delay",
+                "description": "Auto set delay to long delay seconds when spam is detected.",
+                "alias": "spammer_config_autodelay",
+                "default": true
+              },
+              {
+                "type": "input_int",
+                "text": "Delay detected spam (ms)",
+                "default": "20000",
+                "label": "milliseconds",
+                "placeholder": "20000",
+                "icon": "CircleNotifications",
+                "alias": "spammer_config_delay_long"
+              },
+              {
+                "type": "toggle",
+                "text": "Random Color",
+                "description": "Random color chat every line of spam.",
+                "alias": "spammer_config_autocolor",
+                "default": false
+              },
+              {
+                "type": "toggle",
+                "text": "Random Order",
+                "description": "Shuffle the order of spam.",
+                "alias": "spammer_config_shuffle",
+                "default": false
+              },
+              {
+                "type": "toggle",
+                "text": "Send to Client",
+                "alias": "spammer_config_sendclient",
+                "description": "Send to client first before sending it into server"
+              },
+              {
+                "type": "input_string",
+                "text": "Text to spam",
+                "label": "Input your text to spam.",
+                "placeholder": "Hello growtopia!",
+                "icon": "CommentBank",
+                "alias": "spammer_config_texttospam"
+              },
+              {
+                "type": "button",
+                "text": "Add to list",
+                "alias": "spammer_config_addtolist"
+              },
+              {
+                "type": "button",
+                "background": false,
+                "text": "Clear list",
+                "alias": "spammer_config_clearlist"
+              },
+              {
+                "type": "simple_display",
+                "icon": "Commit",
+                "text": "List text to spam",
+                "description": "A list text that will be send to server. Click to delete",
+                "alias": "spammer_config_list",
+                "default": "[]"
+              }
+            ]
+          },
+          {
+            "text": "Start",
+            "type": "toggle_button",
+            "alias": "spammer_config_start"
+          },
+          {
+            "text": "Auto Re-enter",
+            "type": "toggle",
+            "alias": "cheat_config_autoenter"
+          },
+          {
+            "type": "toggle",
+            "text": "Auto replay after enter",
+            "alias": "spammer_replay_active",
+            "description": "Auto replay when enter"
+          },
+          {
+            "type": "label",
+            "text": "Selected replay file"
+          },
+          {
+            "type": "body",
+            "text": "Replay file",
+            "alias": "spammer_replay_selected",
+            "value": "No replay selected"
+          },
+          {
+            "type": "simple_display",
+            "icon": "Sync",
+            "text": "Select replay",
+            "description": "List replay files to action when enter",
+            "alias": "spammer_replay_list",
+            "default": "[]"
+          },
+          {
+            "type": "button",
+            "background": false,
+            "text": "Get all actions",
+            "alias": "spammer_replay_actions"
+          },
+          {
+            "type": "divider"
+          },
+          {
+            "type": "tooltip",
+            "icon": "tips_icon",
+            "text": "Spammer",
+            "alias": "ignore_spammer_1",
+            "background": false,
+            "support_text": "Automatically send a chat in growtopia without typing, this spammer support multiple lines."
+          }
+        ]
+      },
+      {
+        "sub_name": "Autofarm",
+        "description": "Automatically farming without effort touching the screen",
+        "icon": "SmartToy",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Autofarm",
+            "icon": "SmartToy"
+          },
+          {
+            "type":"item_picker",
+            "text":"Block to break",
+            "item": "Blank",
+            "default": "Blank",
+            "alias": "autofarm_item_picker"
+          },
+          {
+            "type": "tile_select",
+            "text": "Select tile to break",
+            "default": "[]",
+            "alias": "autofarm_target_tile",
+            "count": 5
+          },
+          {
+            "type": "dialog",
+            "text": "Setting",
+            "support_text": "Click to open settings",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Autofarm Setting",
+                "description": "Settings for autofarm",
+                "icon": "Settings"
+              },
+              {
+                "type": "label",
+                "text": "Disable this when BFG to make autofarm works"
+              },
+              {
+                "type": "toggle",
+                "text": "Verify before punch",
+                "alias": "autofarm_verify",
+                "description": "Avoid breaking block that isnt targetted",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "text": "Break",
+                "alias": "autofarm_do_break",
+                "description": "Enable break mode in autofarm",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "text": "Place",
+                "alias": "autofarm_do_place",
+                "description": "Enable place mode in autofarm",
+                "default": true
+              },
+              {
+                "type": "tooltip",
+                "text": "Faster autofarm tips",
+                "support_text": "Use hit count 1 if you want faster autofarm",
+                "icon": "RocketLaunch"
+              },
+              {
+                "type": "slider",
+                "text": "Hit Count",
+                "min": 1,
+                "max": 40,
+                "default": 1,
+                "alias": "autofarm_punch_count"
+              },
+              {
+                "type": "input_int",
+                "text": "Delay Break",
+                "default": "180",
+                "label": "millisecond",
+                "alias": "autofarm_autopunch_delay",
+                "icon": "Timer"
+              },
+              {
+                "type": "input_int",
+                "text": "Delay place",
+                "default": "80",
+                "label": "millisecond",
+                "alias": "autofarm_autoplace_delay",
+                "icon": "Timer"
+              },
+              {
+                "type": "toggle",
+                "text": "Autofarm Debug",
+                "description": "Debug running autofarm",
+                "alias": "autofarm_debug",
+                "default": true
+              },
+              {
+                "type": "labelapp",
+                "text": "Guard",
+                "description": "Automation guard for safety",
+                "icon": "Security"
+              },
+              {
+                "type": "toggle",
+                "text": "Verify pos before continue",
+                "description": "Verify the pos you started farm. When you move when afk, player will notice it and try back to position.",
+                "alias": "autofarm_verify_pos",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "text": "Verify pos debug",
+                "description": "Show current valid position",
+                "alias": "autofarm_verify_debug",
+                "default": true
+              },
+              {
+                "type": "slider",
+                "text": "Delay after teleport",
+                "min": 1000,
+                "max": 10000,
+                "default": 1000,
+                "alias": "autofarm_verify_delay"
+              }
+            ]
+          },
+          {
+            "type": "toggle",
+            "text": "Faster break",
+            "description": "Overclock the autofarm to give better performance",
+            "alias": "autofarm_config_overclock",
+            "default": true
+          },
+          {
+            "type": "toggle",
+            "text": "Show punch",
+            "description": "Make your autofarm like normal, but only visible to other",
+            "alias": "autofarm_config_showpunch",
+            "default": true
+          },
+          {
+            "type": "toggle_button",
+            "text": "Start Autofarm",
+            "alias": "autofarm_start",
+            "default": false
+          },
+          {
+            "type": "labelapp",
+            "icon": "SwipeUp",
+            "text": "Auto collect",
+            "description": "Built-in auto collect that is optimized for autofarm."
+          },
+          {
+            "type": "toggle",
+            "text": "Auto collect",
+            "description": "Start built-in auto collect",
+            "alias": "autofarm_autocollect_start",
+            "default": false
+          },
+          {
+            "type": "dialog",
+            "text": "Setting",
+            "support_text": "Click to open settings",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Autocollect Setting",
+                "description": "Settings for autocollect",
+                "icon": "Settings"
+              },
+              {
+                "type": "input_int",
+                "text": "Delay",
+                "default": "100",
+                "label": "millisecond",
+                "alias": "autofarm_autocollect_delay",
+                "icon": "Timer"
+              },
+              {
+                "type": "toggle",
+                "text": "Collect block",
+                "description": "Take block items when dropped",
+                "alias": "autofarm_autocollect_block",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "text": "Collect seed",
+                "description": "Take seed items when dropped",
+                "alias": "autofarm_autocollect_seed",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "text": "Debug",
+                "description": "Debug autocollect",
+                "alias": "autofarm_autocollect_debug",
+                "default": true
+              }
+            ]
+          },
+          {
+            "type": "labelapp",
+            "icon": "Stream",
+            "text": "Auto drop",
+            "description": "Built-in auto drop that is optimized for autofarm."
+          },
+          {
+            "type": "toggle",
+            "text": "Auto drop",
+            "description": "Start built-in auto drop",
+            "alias": "autofarm_autodrop_start",
+            "default": false
+          },
+          {
+            "type": "dialog",
+            "text": "Setting",
+            "support_text": "Click to open settings",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Auto drop Setting",
+                "description": "Settings for auto drop",
+                "icon": "Settings"
+              },
+              {
+                "type": "input_int",
+                "text": "Minimum to drop",
+                "default": "190",
+                "label": "items",
+                "alias": "autofarm_autodrop_minimum"
+              },
+              {
+                "type": "input_int",
+                "alias": "autofarm_autodrop_x",
+                "text": "Position x block",
+                "default": 0,
+                "label": "Block position X",
+                "placeholder": "50"
+              },
+              {
+                "type": "input_int",
+                "alias": "autofarm_autodrop_y",
+                "text": "Position y block",
+                "default": 0,
+                "label": "Block position Y",
+                "placeholder": "20"
+              },
+              {
+                "type": "button",
+                "alias": "autofarm_autodrop_current_pos",
+                "text": "Current position"
+              },
+              {
+                "type": "input_string",
+                "alias": "autofarm_autodrop_worldname",
+                "text": "World to drop",
+                "default": "",
+                "label": "World Name",
+                "placeholder": "EXIT"
+              },
+              {
+                "type": "button",
+                "alias": "autofarm_autodrop_worldname_current",
+                "text": "Current world"
+              }
+            ]
+          },
+          {
+            "type": "labelapp",
+            "icon": "PinDrop",
+            "text": "Auto pick",
+            "description": "Built-in auto pick that is optimized for autofarm. this will take block automatically."
+          },
+          {
+            "type": "toggle",
+            "text": "Auto pick",
+            "description": "Start built-in auto pick",
+            "alias": "autofarm_autopick_enable",
+            "default": false
+          },
+          {
+            "type": "dialog",
+            "text": "Setting",
+            "support_text": "Click to open settings",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Auto pick Setting",
+                "description": "Settings for auto pick",
+                "icon": "Settings"
+              },
+              {
+                "type": "input_string",
+                "alias": "autofarm_autopick_world",
+                "text": "World to pick",
+                "default": "",
+                "label": "World Name",
+                "placeholder": "EXIT"
+              },
+              {
+                "type": "button",
+                "alias": "autofarm_autopick_world_current",
+                "text": "Current world"
+              },
+              {
+                "type": "dropdown",
+                "value": "[\"Auto find\"]",
+                "default": 0,
+                "alias": "autofarm_autopick_mode",
+                "text": "Auto pick mode",
+                "description": "Select the mode to pick"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "sub_name": "Automation",
+        "icon": "Agriculture",
+        "description": "Auto plant and harvest with auto drop and auto take seed features.",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Automation",
+            "description": "Automatic plant and harvest cycle with optional auto drop and auto take seed.",
+            "icon": "Agriculture"
+          },
+          {
+            "type": "item_picker",
+            "text": "Item to farm",
+            "description": "Select the block/seed to automate.",
+            "item": "Blank",
+            "default": "Blank",
+            "alias": "automation_item"
+          },
+          {
+            "type": "toggle",
+            "text": "Enable Auto Collect",
+            "description": "Auto collect after harvest the tree.",
+            "alias": "automation_autocollect",
+            "default": false
+          },
+          {
+            "type": "dropdown",
+            "value": "[\"Plant\", \"Harvest\"]",
+            "default": 0,
+            "alias": "automation_mode",
+            "text": "Mode",
+            "description": "Select automation mode"
+          },
+          {
+            "type": "dialog",
+            "text": "Settings",
+            "support_text": "Click to open automation settings",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Automation Settings",
+                "description": "Configure delays and auto features",
+                "icon": "Settings"
+              },
+              {
+                "type": "toggle",
+                "text": "Safe delay",
+                "description": "To enable safe delay check, to avoid server ban issue, but you still can modify it.",
+                "alias": "automation_safe_delay",
+                "default": true
+              },
+              {
+                "type": "input_int",
+                "text": "Delay plant (ms)",
+                "default": "500",
+                "label": "milliseconds",
+                "placeholder": "500",
+                "icon": "Timer",
+                "alias": "automation_delay_plant"
+              },
+              {
+                "type": "input_int",
+                "text": "Delay harvest (ms)",
+                "default": "500",
+                "label": "milliseconds",
+                "placeholder": "500",
+                "icon": "Timer",
+                "alias": "automation_delay_harvest"
+              },
+              {
+                "type": "toggle",
+                "text": "Anti Miss",
+                "description": "Wait until the server confirms each tile before moving on, and resend if the action never lands. Slower but no tile is skipped.",
+                "alias": "automation_antimiss",
+                "default": false
+              },
+              {
+                "type": "toggle",
+                "text": "Start from bottom",
+                "description": "Sweep the bottom row first and go up, instead of top row first going down.",
+                "alias": "automation_start_from_bottom",
+                "default": false
+              },
+              {
+                "type": "labelapp",
+                "text": "Auto Drop",
+                "description": "Automatically drop items when inventory is full.",
+                "icon": "Stream"
+              },
+              {
+                "type": "toggle",
+                "text": "Enable Auto Drop",
+                "description": "Walk to drop position and drop items when reaching minimum amount.",
+                "alias": "automation_autodrop",
+                "default": false
+              },
+              {
+                "type": "input_int",
+                "text": "Minimum to drop",
+                "default": "190",
+                "label": "items",
+                "placeholder": "190",
+                "icon": "Inventory",
+                "alias": "automation_autodrop_minimum"
+              },
+              {
+                "type": "input_int",
+                "text": "Drop position X",
+                "default": "0",
+                "label": "Block position X",
+                "placeholder": "0",
+                "icon": "LocationOn",
+                "alias": "automation_autodrop_x"
+              },
+              {
+                "type": "input_int",
+                "text": "Drop position Y",
+                "default": "0",
+                "label": "Block position Y",
+                "placeholder": "0",
+                "icon": "LocationOn",
+                "alias": "automation_autodrop_y"
+              },
+              {
+                "type": "button",
+                "alias": "automation_autodrop_current_pos",
+                "text": "Current position"
+              },
+              {
+                "type": "dropdown",
+                "value": "[\"Right\", \"Left\"]",
+                "default": 0,
+                "alias": "automation_autodrop_facing",
+                "text": "Facing when drop",
+                "description": "Direction to face when dropping items"
+              },
+              {
+                "type": "labelapp",
+                "text": "Auto Take Seed",
+                "description": "Automatically take seeds from ground when running low.",
+                "icon": "PinDrop"
+              },
+              {
+                "type": "toggle",
+                "text": "Enable Auto Take",
+                "description": "Walk to dropped seeds and collect them automatically.",
+                "alias": "automation_autotake",
+                "default": false
+              },
+              {
+                "type": "input_int",
+                "text": "Minimum to take",
+                "default": "0",
+                "label": "items",
+                "placeholder": "0",
+                "icon": "Inventory",
+                "alias": "automation_autotake_minimum"
+              },
+              {
+                "type": "labelapp",
+                "text": "Auto Splice",
+                "description": "Automatically splice planted seeds with another item.",
+                "icon": "Merge"
+              },
+              {
+                "type": "toggle",
+                "text": "Enable Auto Splice",
+                "description": "After planting seeds, splice them with the chosen item.",
+                "alias": "automation_autosplice",
+                "default": false
+              },
+              {
+                "type": "item_picker",
+                "text": "Item to splice",
+                "description": "Select the item to splice with planted seeds.",
+                "item": "Blank",
+                "default": "Blank",
+                "alias": "automation_splice_item"
+              },
+              {
+                "type": "input_int",
+                "text": "Minimum planted before splice",
+                "default": "10",
+                "label": "tiles",
+                "placeholder": "10",
+                "icon": "Grass",
+                "alias": "automation_autosplice_minimum_planted"
+              },
+              {
+                "type": "labelapp",
+                "text": "Debug",
+                "description": "Visualize what automation is doing.",
+                "icon": "BugReport"
+              },
+              {
+                "type": "toggle",
+                "text": "Automation Debug",
+                "description": "Draw plant/harvest/splice targets, reach area, walk target and recent actions.",
+                "alias": "automation_debug",
+                "default": true
+              }
+            ]
+          },
+          {
+            "type": "toggle",
+            "text": "Smart Delay",
+            "description": "Automatically adjust plant/harvest/splice delay to the pace the server accepts, based on server responses. Turn off to use the raw delay settings only.",
+            "alias": "automation_smart_delay",
+            "default": false
+          },
+          {
+            "type": "toggle_button",
+            "text": "Start",
+            "description": "Start automation cycle.",
+            "alias": "automation_start",
+            "default": false
+          }
+        ]
+      },
+      {
+        "sub_name": "Collect",
+        "icon": "ReadMore",
+        "description": "Automation about collect utils",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Filter",
+            "description": "Filter collecting items",
+            "icon": "FilterAlt"
+          },
+          {
+            "type": "dialog",
+            "text": "Filter settings",
+            "support_text": "Click to open filter settings.",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Filter Setting",
+                "description": "Settings for filter auto collect.",
+                "icon": "Settings"
+              },
+              {
+                "type": "tooltip",
+                "text": "Info",
+                "icon": "tips_icon",
+                "support_text": "Filter collect, this feature is usefully for who want to take specific item in dropped items, this feature work to setting autocollect too...",
+                "background": false
+              },
+              {
+                "type":"item_picker",
+                "text":"Item",
+                "item": "Blank",
+                "default": "Blank",
+                "alias": "collectfilter_itemtotake"
+              },
+              {
+                "type": "input_int",
+                "text": "Specified value",
+                "default": "0",
+                "label": "Value",
+                "placeholder": "Item ID",
+                "icon": "Edit",
+                "alias": "filter_collect_valuetake"
+              },
+              {
+                "type": "toggle_button",
+                "text": "Enable only take to item",
+                "alias": "collectfilter_onlytake",
+                "default": false
+              },
+              {
+                "type": "tooltip",
+                "text": "What does this do ?",
+                "icon": "QuestionMark",
+                "support_text": "You will take specified item only and ignoring other item, and specified value its used to take perfect fish",
+                "background": false
+              },
+              {
+                "type": "divider"
+              },
+              {
+                "type":"item_picker",
+                "text":"Item",
+                "item": "Gems",
+                "default": "Gems",
+                "alias": "collectfilter_itemdisabletake"
+              },
+              {
+                "type": "toggle_button",
+                "text": "Disable take to item",
+                "alias": "collectfilter_disabletake",
+                "default": false
+              },
+              {
+                "type": "tooltip",
+                "text": "What does this do ?",
+                "icon": "QuestionMark",
+                "support_text": "You will ignore specified item, and you will cannot take this item",
+                "background": false
+              }
+            ]
+          },
+          {
+            "type": "toggle_button",
+            "text": "Filter",
+            "alias": "collectfilter_enable",
+            "default": true
+          },
+          {
+            "type": "labelapp",
+            "text": "Auto collect",
+            "description": "Auto collect all items in range or specified tile",
+            "icon": "Interests"
+          },
+          {
+            "type": "dialog",
+            "text": "Setting",
+            "support_text": "Click to open setting",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Auto collect Setting",
+                "description": "Settings for auto collect.",
+                "icon": "Settings"
+              },
+              {
+                "type": "input_int",
+                "text": "Delay",
+                "default": "30",
+                "label": "millisecond",
+                "alias": "auto_collect_delay"
+              },
+              {
+                "type": "toggle",
+                "text": "Fast take",
+                "description": "Make auto collect is more faster to collect",
+                "alias": "auto_collect_faster",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "text": "Check before take",
+                "description": "Make auto collect check first before starting to take",
+                "alias": "auto_collect_check",
+                "default": true,
+                "expandable": true,
+                "always_expand": true,
+                "list_child": [
+                  {
+                    "type": "toggle",
+                    "text": "Inventory check",
+                    "description": "Make auto collect check your inventory before take",
+                    "alias": "auto_collect_inventory_check",
+                    "default": true
+                  }
+                ]
+              },
+              {
+                "type": "toggle",
+                "text": "Debug area",
+                "description": "Show current area that will be triggered",
+                "alias": "auto_collect_debug_area",
+                "default": false
+              },
+              {
+                "type": "toggle",
+                "text": "Debug take",
+                "description": "Show current items to take",
+                "alias": "auto_collect_debug",
+                "default": true
+              },
+              {
+                "type": "dropdown",
+                "value": "[\"Radius\", \"Tile\"]",
+                "default": 0,
+                "alias": "auto_collect_mode",
+                "text": "Auto collect mode",
+                "description": "Select the mode to collect"
+              },
+              {
+                "type": "labelapp",
+                "icon": "Pages",
+                "text": "Radius collect",
+                "description": "Collect items in radius"
+              },
+              {
+                "type": "slider",
+                "text": "Radius auto collect",
+                "min": 1,
+                "max": 11,
+                "default": 11,
+                "alias": "auto_collect_radius"
+              },
+              {
+                "type": "labelapp",
+                "icon": "BorderOuter",
+                "text": "Tile collect",
+                "description": "Collect items in tile"
+              },
+              {
+                "type": "tile_select",
+                "text": "Select tile to collect",
+                "default": "{}",
+                "alias": "auto_collect_tile",
+                "count": 11
+              }
+            ]
+          },
+          {
+            "type": "toggle_button",
+            "text": "Auto collect",
+            "alias": "autocollectstart"
+          }
+        ]
+      },
+      {
+        "sub_name": "Fishing",
+        "icon": "Phishing",
+        "description": "Automatically pull when catch a fish.",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Autofish",
+            "icon": "Phishing",
+            "description": "Automatically pull when catch a fish."
+          },
+          {
+            "type":"item_picker",
+            "text":"Bait",
+            "item": "Wiggly Worm",
+            "default": "Wiggly Worm",
+            "alias": "autofish_config_bait"
+          },
+          {
+            "type": "dialog",
+            "text": "Setting",
+            "support_text": "Click to open setting",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Fishing Setting",
+                "description": "Settings for autofish",
+                "icon": "Settings"
+              },
+              {
+                "type": "input_int",
+                "text": "Delay after catch",
+                "default": "1500",
+                "label": "millisecond",
+                "placeholder": "1500",
+                "icon": "Edit",
+                "alias": "autofish_config_delay"
+              },
+              {
+                "type": "dropdown",
+                "value": "[\"Left\", \"Right\"]",
+                "default": 0,
+                "alias": "autofish_config_direct",
+                "text": "Direction",
+                "description": "Select the direction to fish"
+              },
+              {
+                "type": "tooltip",
+                "icon": "Settings",
+                "text": "Advanced Setting",
+                "support_text": "You can use mode for autofish (optional)"
+              },
+              {
+                "type": "toggle_button",
+                "text": "Detonator Mode",
+                "default": false,
+                "alias": "autofish_config_detonator"
+              },
+              {
+                "type": "toggle_button",
+                "text": "Hand Drill Mode",
+                "default": false,
+                "alias": "autofish_config_handdrill"
+              },
+              {
+                "type": "tooltip",
+                "icon": "AccessTime",
+                "text": "Timer",
+                "support_text": "Delay before start fishing again after detonator or hand drill is triggered"
+              },
+              {
+                "type": "input_int",
+                "text": "Delay after trigger mode",
+                "default": "1500",
+                "label": "millisecond",
+                "placeholder": "1500",
+                "icon": "Edit",
+                "alias": "autofish_config_delaymode"
+              },
+              {
+                "type": "input_int",
+                "text": "Minimum items in front to move",
+                "default": "20",
+                "label": "item",
+                "placeholder": "20",
+                "icon": "Edit",
+                "alias": "autofish_config_minimum_to_move"
+              }
+            ]
+          },
+          {
+            "type": "toggle_button",
+            "text": "Start",
+            "default": false,
+            "alias": "autofish_config_start"
+          },
+          {
+            "type": "labelapp",
+            "icon": "Stream",
+            "text": "Built-in features",
+            "description": "Built-in features that is optimized for auto fish."
+          },
+          {
+            "type": "toggle",
+            "text": "Auto teleport back",
+            "description": "Automatically teleport back",
+            "default": false,
+            "alias": "autofish_autoteleport"
+          },
+          {
+            "type": "toggle",
+            "text": "Auto move",
+            "description": "Automatically move when the items dropped is full",
+            "default": false,
+            "alias": "autofish_automove"
+          },
+          {
+            "type": "dropdown",
+            "value": "[\"Auto Drop\", \"Auto Trash\"]",
+            "default": 0,
+            "alias": "autofish_action_catch",
+            "text": "Action after catch",
+            "description": "Select the action after catch"
+          },
+          {
+            "type": "dropdown",
+            "value": "[\"ALL\", \"Fish Only\", \"Non-fish Only\"]",
+            "default": 0,
+            "alias": "autofish_action_catch_filter",
+            "text": "Filter Action",
+            "description": "Filter the action when catch"
+          },
+          {
+            "type": "toggle",
+            "text": "Enable Action",
+            "description": "Enable action after catch a fish",
+            "default": false,
+            "alias": "autofish_action_enable"
+          },
+          {
+            "type": "tooltip",
+            "text": "How to use ?",
+            "support_text": "Click start. Set the direction for fishing, select the mode. after that click start",
+            "icon": "tips_icon"
+          }
+        ]
+      },
+      {
+        "sub_name": "AutoCrime",
+        "icon": "SensorOccupied",
+        "description": "Automatically defeat a crime",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "AutoCrime",
+            "icon": "SensorOccupied",
+            "description": "Automatically defeat a crime"
+          },
+          {
+            "type": "tooltip",
+            "text": "How to use ?",
+            "support_text": "After enable the feature, just punch the crime.",
+            "icon": "tips_icon"
+          },
+          {
+            "text": "AutoCrime",
+            "description": "Punch the crime to start",
+            "type": "toggle",
+            "default": false,
+            "alias": "autocrime_is_active"
+          }
+        ]
+      },
+      {
+        "sub_name": "Copy Song",
+        "icon": "MusicNote",
+        "description": "Mimic the song of current world",
+        "menu": [
+          {
+            "type": "labelapp",
+            "icon": "MusicNote",
+            "description": "Mimic the song of current world, to your own world.",
+            "text": "Copy Song"
+          },
+          {
+            "type": "dropdown",
+            "value": "[\"Semi Auto\", \"Full Auto\"]",
+            "default": 0,
+            "alias": "copysong_place_mode",
+            "text": "Automation mode",
+            "description": "Select the automation mode"
+          },
+          {
+            "type": "toggle_button",
+            "text": "Start",
+            "alias": "copysong_activate",
+            "default": false
+          },
+          {
+            "type": "toggle",
+            "text": "Debug",
+            "description": "Show the position tile to place",
+            "alias": "copysong_debug",
+            "default": true
+          },
+          {
+            "type": "dialog",
+            "text": "Save",
+            "support_text": "Click to save song",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Save Song",
+                "description": "Save your current song",
+                "icon": "Settings"
+              },
+              {
+                "type": "input_string",
+                "alias": "copysong_filename",
+                "text": "Filename",
+                "default": "MySong",
+                "label": "Input your song",
+                "placeholder": "MySong"
+              },
+              {
+                "type": "button",
+                "alias": "copysong_filename_current",
+                "text": "Current world"
+              },
+              {
+                "type": "button",
+                "alias": "copysong_filename_add",
+                "text": "Add"
+              }
+            ]
+          },
+          {
+            "type": "simple_display",
+            "icon": "AudioFile",
+            "text": "Song file",
+            "description": "A list song that is saved in local storage",
+            "alias": "copysong_list_song",
+            "default": "[]",
+            "setup": false
+          },
+          {
+            "type": "toggle_button",
+            "text": "Delete Mode",
+            "alias": "copysong_delete",
+            "default": false
+          },
+          {
+            "type": "button",
+            "text": "Refresh",
+            "alias": "copysong_file_refresh"
+          },
+          {
+            "type": "simple_display",
+            "icon": "FastForward",
+            "text": "Required Notes",
+            "description": "A list notes required for the song, click to find vend and teleport to it",
+            "alias": "copysong_list_notes",
+            "default": "[]",
+            "setup": false
+          },
+          {
+            "type": "button",
+            "alias": "copysong_refresh_required",
+            "text": "Refresh required"
+          },
+          {
+            "type": "button",
+            "alias": "copysong_start_copy",
+            "text": "Copy world song"
+          }
+        ]
+      },
+      {
+        "sub_name": "Ghost",
+        "description": "Automatically punch the nearest ghost.",
+        "icon": "Try",
+        "menu": [
+          {
+            "type": "labelapp",
+            "icon": "Try",
+            "text": "Auto Ghost",
+            "description": "Automatically punch the nearest ghost."
+          },
+          {
+            "type": "toggle",
+            "text": "Auto Punch Ghost",
+            "default": false,
+            "alias": "cheat_auto_esp_ghost",
+            "description": "Start auto punch, nearest is the priority, make sure you already wear neutron gun"
+          },
+          {
+            "type": "toggle",
+            "text": "Show Punch",
+            "default": true,
+            "alias": "cheat_auto_esp_ghost_show_punch",
+            "description": "Show punch in client."
+          },
+          {
+            "type": "toggle",
+            "text": "Auto put jar",
+            "default": false,
+            "alias": "cheat_auto_esp_ghost_jar",
+            "description": "Automatically punch the nearest ghost."
+          },
+          {
+            "type": "slider",
+            "text": "Search Radius",
+            "min": 1,
+            "max": 10,
+            "default": 8,
+            "alias": "ghost_config_radius"
+          },
+          {
+            "text": "Settings",
+            "type": "dialog",
+            "support_text": "Click to open setting",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Ghost Settings",
+                "description": "Settings for auto ghost",
+                "icon": "SettingsInputComposite"
+              },
+              {
+                "type": "input_int",
+                "text": "Minimum ghost stay before put jar",
+                "default": "2500",
+                "label": "milliseconds",
+                "placeholder": "2500",
+                "icon": "Edit",
+                "alias": "ghost_config_min_in_radius"
+              }
+            ]
+          },
+          {
+            "type": "toggle",
+            "text": "Debug",
+            "description": "Debug for auto punch ghost, only show when auto punch enabled.",
+            "default": true,
+            "alias": "cheat_auto_esp_ghost_debug",
+            "expandable": true,
+            "list_child": [
+              {
+                "type": "toggle",
+                "text": "Show Distance",
+                "alias": "ghost_debug_distance",
+                "description": "Draw distance from player.",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "text": "Show Target",
+                "description": "Draw target punch.",
+                "alias": "ghost_debug_target",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "text": "Show Line",
+                "description": "Draw target line.",
+                "alias": "ghost_debug_line",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "text": "Show Ghost State",
+                "alias": "ghost_debug_state",
+                "description": "Show the ghost state.",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "text": "Show Ghost Type",
+                "description": "Show the ghost type.",
+                "alias": "ghost_debug_type",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "text": "Show Radius Rectangle",
+                "description": "Draw rectangle radius.",
+                "alias": "ghost_debug_circle",
+                "default": true
+              }
+            ]
+          },
+          {
+            "type": "toggle",
+            "text": "Esp Ghost",
+            "default": false,
+            "alias": "cheat_esp_ghost",
+            "description": "Enable esp for ghost."
+          },
+          {
+            "type": "tooltip",
+            "icon": "tips_icon",
+            "text": "Auto Teleport",
+            "support_text": "This will make the player teleport to Ghost, when the ghost isnt 4 block around"
+          },
+          {
+            "type": "toggle",
+            "text": "Auto Teleport",
+            "alias": "cheat_esp_ghost_auto_teleport",
+            "description": "Automatically teleport to ghost when ghost isn't in radius."
+          },
+          {
+            "type": "label",
+            "text": "Ghost Options"
+          },
+          {
+            "type": "toggle",
+            "text": "Normal Ghost",
+            "alias": "ghost_auto_normal",
+            "default": true
+          },
+          {
+            "type": "toggle",
+            "text": "Mind Ghost",
+            "alias": "ghost_auto_mind",
+            "default": true
+          },
+          {
+            "type": "toggle",
+            "text": "Winter Ghost",
+            "alias": "ghost_auto_winter",
+            "default": true
+          }
+        ]
+      },
+      {
+        "sub_name": "Replay",
+        "icon": "VideogameAsset",
+        "description": "Replay your action, for custom automation",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Replay",
+            "icon": "VideogameAsset",
+            "description": "Record and replay packets."
+          },
+          {
+            "type": "toggle",
+            "text": "Record",
+            "description": "Start recording outgoing packets.",
+            "alias": "replay_record_active",
+            "default": false
+          },
+          {
+            "type": "toggle",
+            "text": "Play",
+            "description": "Start replaying recorded packets.",
+            "alias": "replay_play_active",
+            "default": false
+          },
+          {
+            "type": "toggle",
+            "text": "Loop",
+            "description": "Loop replaying recorded packets.",
+            "alias": "replay_loop",
+            "default": false
+          },
+          {
+            "type": "toggle",
+            "text": "Raw Packet",
+            "description": "Start recording raw packets.",
+            "alias": "replay_record_active_raw",
+            "default": true
+          },
+          {
+            "type": "toggle",
+            "text": "Text Packet",
+            "description": "Start recording text packets.",
+            "alias": "replay_record_active_text",
+            "default": true
+          },
+          {
+            "type": "input_int",
+            "text": "Custom delay (ms)",
+            "description": "Delay between packets (0 = use recorded delay).",
+            "alias": "replay_custom_delay",
+            "default": "0"
+          },
+          {
+            "type": "button",
+            "text": "Clear Actions",
+            "alias": "replay_clear"
+          },
+          {
+            "type": "dialog",
+            "text": "Save",
+            "support_text": "Click to save actions",
+            "menu": [
+              {
+                "type": "labelapp",
+                "text": "Save Actions",
+                "description": "Save your current actions",
+                "icon": "Settings"
+              },
+              {
+                "type": "input_string",
+                "alias": "replay_filename",
+                "text": "Filename",
+                "default": "MyReplay",
+                "label": "Input your replay",
+                "placeholder": "MyReplay"
+              },
+              {
+                "type": "button",
+                "alias": "replay_filename_add",
+                "text": "Add"
+              }
+            ]
+          },
+          {
+            "type": "simple_display",
+            "text": "Actions recorded",
+            "description": "List of actions.",
+            "alias": "replay_list",
+            "default": "[]"
+          },
+          {
+            "type": "button",
+            "text": "Refresh",
+            "alias": "replay_action_refresh"
+          },
+          {
+            "type": "simple_display",
+            "icon": "FastForward",
+            "text": "Replay files",
+            "description": "A list saved action in local storage",
+            "alias": "replay_file_list",
+            "default": "[]"
+          },
+          {
+            "type": "button",
+            "text": "Refresh",
+            "alias": "replay_file_refresh"
+          }
+        ]
+      },
+      {
+        "sub_name": "Wrench",
+        "icon": "Build",
+        "description": "Automatically action when wrench ability is triggered",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Wrench Mode",
+            "icon": "Build",
+            "description": "Automatically action when wrench ability is triggered"
+          },
+          {
+            "type": "dropdown",
+            "value": "[\"Pull\", \"Kick\", \"Ban\"]",
+            "default": 0,
+            "alias": "cheat_fastwrench",
+            "text": "Fast wrench mode",
+            "description": "Select the mode to wrench"
+          },
+          {
+            "type": "toggle",
+            "text": "Enable",
+            "alias": "cheat_fastwrench_enable",
+            "description": "Enable the fast wrench features.",
+            "expandable": true,
+            "list_child": [
+              {
+                "type": "toggle",
+                "text": "Enhanced Mode",
+                "alias": "cheat_fastwrench_enhanced",
+                "description": "Click tile and whoever player in that tile will be triggered."
+              }
+            ]
+          },
+          {
+            "text": "Auto Wrench",
+            "alias": "cheat_autowrench",
+            "description": "Automatically wrench when player joined the world.",
+            "type": "toggle",
+            "default": false,
+            "expandable": true,
+            "list_child": [
+              {
+                "type": "dropdown",
+                "value": "[\"Pull\", \"Kick\", \"Ban\"]",
+                "default": 0,
+                "alias": "cheat_autowrench_mode",
+                "text": "Auto wrench mode",
+                "description": "Select the mode to auto wrench"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "sub_name": "Moderator Exit",
+        "description": "Automatically backup all items and automatically leave when moderator enter the world.",
+        "icon": "Security",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Autosave Feature",
+            "description": "This feature is supported with autosave, so make sure you have enabled it",
+            "icon": "Security"
+          },
+          {
+            "type": "toggle",
+            "alias": "mod_exit_enable",
+            "text": "Enable",
+            "description": "Enable auto exit when moderator enter"
+          },
+          {
+            "type": "dropdown",
+            "value": "[\"Exit\", \"Drop\", \"Donate\"]",
+            "default": 0,
+            "alias": "modexit_mode",
+            "text": "Autoexit mode",
+            "description": "Select action when moderator enter world."
+          },
+          {
+            "type": "dialog",
+            "text": "Auto drop",
+            "support_text": "Drop all your items into some world, priority is currency items",
+            "menu": [
+              {
+                "type": "labelapp",
+                "icon": "PinDrop",
+                "text": "Auto drop",
+                "description": "Drop all your items into some world, priority is currency items"
+              },
+              {
+                "type": "input_string",
+                "alias": "mod_exit_drop_world",
+                "text": "World to drop",
+                "default": "",
+                "label": "World Name",
+                "placeholder": "EXIT"
+              },
+              {
+                "type": "button",
+                "alias": "mod_exit_current_world",
+                "text": "Current world"
+              },
+              {
+                "type": "input_int",
+                "alias": "mod_exit_drop_pos_x",
+                "text": "Position x block",
+                "default": 0,
+                "label": "Block position X",
+                "placeholder": "50"
+              },
+              {
+                "type": "input_int",
+                "alias": "mod_exit_drop_pos_y",
+                "text": "Position y block",
+                "default": 0,
+                "label": "Block position Y",
+                "placeholder": "20"
+              },
+              {
+                "type": "button",
+                "alias": "mod_exit_current_drop",
+                "text": "Current position"
+              }
+            ]
+          },
+          {
+            "type": "dialog",
+            "text": "Auto donate",
+            "support_text": "Donate all your items into some world, priority is currency items",
+            "menu": [
+              {
+                "type": "labelapp",
+                "icon": "CardGiftcard",
+                "text": "Auto donate",
+                "description": "Donate all your items into some world, priority is currency items"
+              },
+              {
+                "type": "input_string",
+                "alias": "mod_exit_donate_world",
+                "text": "World to donate",
+                "default": "",
+                "label": "World Name",
+                "placeholder": "EXIT"
+              },
+              {
+                "type": "button",
+                "alias": "mod_exit_current_world_donate",
+                "text": "Current world"
+              },
+              {
+                "type": "input_int",
+                "alias": "mod_exit_donate_player_pos_x",
+                "text": "Position x block",
+                "default": 0,
+                "label": "Player position X",
+                "placeholder": "50"
+              },
+              {
+                "type": "input_int",
+                "alias": "mod_exit_donate_player_pos_y",
+                "text": "Position y block",
+                "default": 0,
+                "label": "Player position Y",
+                "placeholder": "20"
+              },
+              {
+                "type": "button",
+                "alias": "mod_exit_current_donate",
+                "text": "Current position"
+              },
+              {
+                "type": "input_int",
+                "alias": "mod_exit_donate_pos_x",
+                "text": "Position x block",
+                "default": 0,
+                "label": "Donate box position X",
+                "placeholder": "50"
+              },
+              {
+                "type": "input_int",
+                "alias": "mod_exit_donate_pos_y",
+                "text": "Position y block",
+                "default": 0,
+                "label": "Donate box position Y",
+                "placeholder": "20"
+              },
+              {
+                "type": "toggle_button",
+                "alias": "mod_exit_punch_donate",
+                "text": "Punch donate to fill"
+              },
+              {
+                "type": "button",
+                "alias": "mod_exit_find_donate",
+                "text": "Auto find nearest"
+              }
+            ]
+          },
+          {
+            "type": "button",
+            "text": "Trigger",
+            "alias": "DEBUG_MOD_JOIN"
+          },
+          {
+            "type": "simple_display",
+            "icon": "PriorityHigh",
+            "text": "Priority to drop first",
+            "description": "A list items that will be first, click to delete",
+            "alias": "mod_edit_priority_list",
+            "default": "[]"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "category": "World",
+    "icon": "Public",
+    "sub_category": [
+      {
+        "sub_name": "Growscan",
+        "icon": "TravelExplore",
+        "description": "Scanning all blocks and floating in without delay and without real Growscan.",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Growscan",
+            "description": "Scanning all blocks and floating in without delay and without real Growscan.",
+            "icon": "TravelExplore"
+          },
+          {
+            "type": "button",
+            "text": "Open Growscan",
+            "alias": "cheat_growscan_open"
+          },
+          {
+            "type": "label",
+            "text": "Shortcut"
+          },
+          {
+            "type": "body",
+            "text": "Command Growscan",
+            "value": "Type \"/gscan\" in chat to open"
+          },
+          {
+            "type": "button",
+            "text": "Scan Floating Items",
+            "alias": "cheat_growscan_open_floating"
+          },
+          {
+            "type": "button",
+            "text": "Scan Block",
+            "alias": "cheat_growscan_open_block"
+          },
+          {
+            "type": "tooltip",
+            "text": "Features: ",
+            "support_text": "This growscan can tell where is the item/block position by clicking the icon",
+            "icon": "tips_icon"
+          }
+        ]
+      },
+      {
+        "sub_name": "Weather",
+        "icon": "Cloud",
+        "description": "Menu about world weather.",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Weather",
+            "description": "To replace current weather with visual weather.",
+            "icon": "Cloud"
+          },
+          {
+            "type": "tooltip",
+            "text": "Coming soon",
+            "support_text": "This feature is coming soon ^-^",
+            "icon": "Upcoming"
+          }
+        ]
+      },
+      {
+        "sub_name": "Random",
+        "icon": "ViewStream",
+        "description": "Navigate into random world with generated letters",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Random world",
+            "icon": "ViewStream",
+            "description": "Navigate into random world with generated letters"
+          },
+          {
+            "type": "slider",
+            "text": "Length",
+            "min": 1,
+            "max": 12,
+            "default": 5,
+            "alias": "cheat_config_randomworld_length"
+          },
+          {
+            "type": "label",
+            "text": "Setting"
+          },
+          {
+            "text": "With Number",
+            "type": "toggle",
+            "default": true,
+            "alias": "cheat_config_randomworld_withnumber",
+            "description": "Add number when generating the letter"
+          },
+          {
+            "type": "button",
+            "text": "Find",
+            "alias": "cheat_config_randomworld_find"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "category": "Module",
+    "icon": "Widgets",
+    "sub_category": [
+      {
+        "sub_name": "Lua Manager",
+        "icon": "Memory",
+        "description": "Execute lua script",
+        "menu": [
+          {
+            "type": "labelapp",
+            "text": "Lua Executor",
+            "description": "Click button below to run lua executor.",
+            "icon": "RocketLaunch"
+          },
+          {
+            "text": "Start Lua Manager",
+            "type": "toggle_button",
+            "alias": "luamanager_start",
+            "default": false
+          },
+          {
+            "text": "Refresh",
+            "type": "button",
+            "alias": "luamanager_refresh",
+            "default": false
+          },
+          {
+            "type": "simple_display",
+            "icon": "PlayArrow",
+            "text": "Running Scripts",
+            "description": "List that show a running lua scripts.",
+            "alias": "luamanager_running",
+            "default": "[]"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "category": "Setting",
+    "icon": "Settings",
+    "sub_category": [
+      {
+        "sub_name": "Misc",
+        "icon": "MiscellaneousServices",
+        "description": "Miscellaneous settings",
+        "menu": [
+          {
+            "type": "labelapp",
+            "description": "Settings about default world",
+            "text": "World",
+            "icon": "Public"
+          },
+          {
+            "type": "toggle",
+            "text": "Fast Dice",
+            "description": "See dice roll faster than normal player.",
+            "default": false,
+            "alias": "cheat_config_fastdice"
+          },
+          {
+            "type": "toggle",
+            "text": "Fast Wheel",
+            "description": "See wheel output faster than normal player.",
+            "default": false,
+            "alias": "cheat_config_fastwheel"
+          },
+          {
+            "text": "Anti Gravity",
+            "description": "Enable anti gravity in current world",
+            "alias": "Gravity",
+            "type": "toggle",
+            "default": true,
+            "autosave": true
+          },
+          {
+            "text": "Anti Punch",
+            "alias": "Antipunch",
+            "description": "Enable anti punch in current world",
+            "type": "toggle",
+            "default": false,
+            "autosave": true
+          },
+          {
+            "type": "labelapp",
+            "icon": "ToggleOn",
+            "text": "Extra Setting",
+            "description": "More extra settings"
+          },
+          {
+            "type": "toggle",
+            "text": "Antilag",
+            "default": false,
+            "alias": "cheat_antilag",
+            "description": "Skip render background",
+            "autosave": true
+          },
+          {
+            "type": "toggle",
+            "text": "No Particle",
+            "default": false,
+            "alias": "config_cheat_noparticle",
+            "description": "Skip all render particles",
+            "autosave": true
+          },
+          {
+            "type": "toggle",
+            "text": "ModZoom",
+            "description": "Enable moderator zoom ability",
+            "default": true,
+            "alias": "cheat_setting_modzoom",
+            "autosave": true
+          },
+          {
+            "type": "button",
+            "text": "Refresh Items Dat",
+            "alias": "cheat_refresh_items_dat"
+          }
+        ]
+      }
+    ]
+  }
+]
