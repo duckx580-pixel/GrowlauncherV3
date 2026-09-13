@@ -35,6 +35,13 @@ public final class NativeLibraries {
             Log.e(TAG, "lib" + GAME_LIBRARY + ".so is missing from jniLibs: " + e.getMessage());
             gameLoaded = false;
         }
+        try {
+            // Renders by being called from AppRenderer.onDrawFrame(), not via any
+            // hook, so load order relative to growtopia doesn't matter.
+            System.loadLibrary("zennkuy");
+        } catch (UnsatisfiedLinkError e) {
+            Log.w(TAG, "libzennkuy.so not found, overlay disabled: " + e.getMessage());
+        }
         com.gentz.launcher.CrashLogger.installNativeHandler();
         return gameLoaded;
     }

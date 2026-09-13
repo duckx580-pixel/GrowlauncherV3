@@ -104,6 +104,11 @@ public class AppRenderer implements GLSurfaceView.Renderer {
                     && NativeLibraries.isGameLoaded()) {
                 nativeUpdate();
                 nativeRender();
+                try {
+                    ZennKuyRenderer.nativeDrawFrame();
+                } catch (UnsatisfiedLinkError ignored) {
+                    // libzennkuy not loaded (debug builds without the lib)
+                }
             }
 
             // Proton OS message pump
@@ -172,6 +177,11 @@ public class AppRenderer implements GLSurfaceView.Renderer {
         this.width = w;
         this.height = h;
         nativeSetWindow(SharedActivity.mGLView.getHolder().getSurface());
+        try {
+            ZennKuyRenderer.nativeSurfaceChanged(w, h);
+        } catch (UnsatisfiedLinkError ignored) {
+            // libzennkuy not loaded (debug builds without the lib)
+        }
     }
 
     @Override
