@@ -9,7 +9,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
 import android.util.Log;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -68,22 +67,10 @@ public class Main extends SharedActivity {
         return true;
     }
 
-    // Native methods in libzennkuy.so
-    public static native void nativeOnTouch(int action, float x, float y);
-    public static native boolean isImGuiCapturingInput();
-
-    @Override
-    public boolean dispatchTouchEvent(MotionEvent ev) {
-        try {
-            nativeOnTouch(ev.getAction(), ev.getX(), ev.getY());
-            if (isImGuiCapturingInput()) return true;
-        } catch (UnsatisfiedLinkError ignored) {
-            // libzennkuy not loaded (debug builds without the lib)
-        }
-        return super.dispatchTouchEvent(ev);
-    }
-
     // Input is handled by AppGLSurfaceView and SharedActivity's JNI bridge.
+    // The mod menu overlay (ModMenuOverlay) is a plain Android View added to
+    // mViewGroup, so it captures touches on its own — no dispatchTouchEvent
+    // interception needed.
 
     private void applyImmersiveFullscreen() {
         if (Build.VERSION.SDK_INT >= 30) {
@@ -238,6 +225,11 @@ public class Main extends SharedActivity {
         this.ironSourceManager.OnCreate();
         this.appReviewManager.OnCreate();
         getWindow().addFlags(128); // FLAG_KEEP_SCREEN_ON
+
+        // Mod menu: plain Android View overlay on top of mGLView, added to the
+        // same RelativeLayout the login WebView uses. No native rendering hook
+        // required, so it works regardless of how libgrowtopia.so calls EGL.
+        ModMenuOverlay.attach(this, mViewGroup);
 
         // Handle grow:// redirect if the activity was cold-started by the OAuth callback.
         handleIntent(getIntent());

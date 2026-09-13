@@ -153,7 +153,7 @@ public class WebViewManager {
         );
     }
 
-    // Returns true when libzennkuy has an active ltoken ready to inject.
+    // Returns true when the mod menu's login spoof has an active ltoken ready to inject.
     private static boolean isLtokenSpoofActive() {
         try {
             if (Main.mainApp == null) return false;
