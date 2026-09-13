@@ -42,7 +42,7 @@ public final class ZennKuyBridge {
         }
     }
 
-    // Opens the WebView-based Google sign-in (same flow as GoogleSignInHelper.signIn()).
+    // Opens Google sign-in via GoogleSignInHelper.SignIn() (same flow the ZK overlay uses).
     public static void startResolving() {
         try {
             if (Main.mainApp == null) return;

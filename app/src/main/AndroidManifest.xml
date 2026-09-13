@@ -110,13 +110,6 @@
             android:theme="@android:style/Theme.NoTitleBar" />
 
         <activity
-            android:name="com.rtsoft.growtopia.GoogleWebSignInActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:screenOrientation="sensorLandscape"
-            android:theme="@android:style/Theme.NoTitleBar" />
-
-        <activity
             android:name="com.facebook.ads.AudienceNetworkActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"

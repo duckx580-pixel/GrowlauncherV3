@@ -2,14 +2,20 @@ package com.rtsoft.growtopia;
 
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -20,9 +26,19 @@ import android.widget.Toast;
 
 /**
  * Floating "ZK" button overlay drawn over the game via mViewGroup.
- * Tap it to open the Google Login fix menu (same container as WebView).
+ * Tap it to open the Google Login fix menu.
  */
 public class ZennKuyOverlay {
+
+    // Dark "mod menu" palette.
+    private static final int C_BG        = Color.parseColor("#16191F");
+    private static final int C_BORDER    = Color.parseColor("#2A3038");
+    private static final int C_FIELD_BG  = Color.parseColor("#0E1013");
+    private static final int C_FIELD_BRD = Color.parseColor("#333B47");
+    private static final int C_TEXT      = Color.parseColor("#ECEFF1");
+    private static final int C_MUTED     = Color.parseColor("#8A94A6");
+    private static final int C_ACCENT    = Color.parseColor("#2ECC71");
+    private static final int C_ACCENT_DK = Color.parseColor("#1E9E52");
 
     private final Context ctx;
     private View floatBtn;
@@ -37,7 +53,7 @@ public class ZennKuyOverlay {
         // RelativeLayout.LayoutParams + addRule — FrameLayout.LayoutParams'
         // gravity field is silently dropped when handed to a RelativeLayout.
         RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(
-                dp(56), dp(56));
+                dp(52), dp(52));
         lp.addRule(RelativeLayout.ALIGN_PARENT_TOP);
         lp.addRule(RelativeLayout.ALIGN_PARENT_END);
         lp.topMargin   = dp(8);
@@ -48,11 +64,18 @@ public class ZennKuyOverlay {
     private View makeToggleButton() {
         Button btn = new Button(ctx);
         btn.setText("ZK");
-        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         btn.setTypeface(null, Typeface.BOLD);
-        btn.setTextColor(Color.WHITE);
-        btn.setBackgroundColor(Color.argb(210, 30, 30, 30));
+        btn.setTextColor(C_TEXT);
         btn.setPadding(0, 0, 0, 0);
+        btn.setElevation(dp(4));
+
+        GradientDrawable circle = new GradientDrawable();
+        circle.setShape(GradientDrawable.OVAL);
+        circle.setColor(Color.argb(230, 18, 20, 24));
+        circle.setStroke(dp(2), C_ACCENT);
+        btn.setBackground(rippled(circle, C_ACCENT));
+
         btn.setOnClickListener(v -> showMenu());
         btn.setOnTouchListener(new DragListener(btn));
         return btn;
@@ -61,66 +84,113 @@ public class ZennKuyOverlay {
     private void showMenu() {
         LoginSpoof spoof = new LoginSpoof(ctx);
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(ctx);
-        builder.setTitle("ZennKuy — Google Login Fix");
+        LinearLayout card = new LinearLayout(ctx);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(roundedRect(C_BG, C_BORDER, 1, 16));
 
+        // ── Header bar ──────────────────────────────────────────────────
+        LinearLayout header = row();
+        header.setPadding(dp(16), dp(14), dp(12), dp(14));
+        TextView badge = label("ZK");
+        badge.setTypeface(null, Typeface.BOLD);
+        badge.setTextColor(Color.parseColor("#0E1013"));
+        badge.setBackground(roundedRect(C_ACCENT, C_ACCENT, 0, 8));
+        badge.setPadding(dp(8), dp(3), dp(8), dp(3));
+        header.addView(badge);
+
+        TextView title = label("ZennKuy  —  Google Login Fix");
+        title.setTypeface(null, Typeface.BOLD);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        titleLp.leftMargin = dp(10);
+        header.addView(title, titleLp);
+        card.addView(header);
+        card.addView(divider());
+
+        // ── Body ─────────────────────────────────────────────────────────
         ScrollView scroll = new ScrollView(ctx);
         LinearLayout root = new LinearLayout(ctx);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(8), dp(16), dp(8));
+        root.setPadding(dp(16), dp(12), dp(16), dp(10));
 
-        root.addView(label("Fix Error 10 — sign in via Google WebView\nto obtain an ltoken for this device."));
-        root.addView(spacer(8));
+        TextView intro = label("Fix Error 10 — sign in with your Google account\nto obtain an ltoken for this device.");
+        intro.setTextColor(C_MUTED);
+        root.addView(intro);
+        root.addView(spacer(12));
 
-        root.addView(label("MAC address"));
+        root.addView(sectionLabel("MAC ADDRESS"));
         LinearLayout macRow = row();
         EditText macEdit = field(spoof.getMac());
-        Button macRand = smallBtn("Random");
+        Button macRand = smallBtn("RANDOM");
         macRand.setOnClickListener(v -> macEdit.setText(spoof.generateMac()));
         macRow.addView(macEdit, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         macRow.addView(macRand);
         root.addView(macRow);
-        root.addView(spacer(6));
+        root.addView(spacer(10));
 
-        root.addView(label("RID"));
+        root.addView(sectionLabel("RID"));
         LinearLayout ridRow = row();
         EditText ridEdit = field(spoof.getRid());
-        Button ridRand = smallBtn("Random");
+        Button ridRand = smallBtn("RANDOM");
         ridRand.setOnClickListener(v -> ridEdit.setText(spoof.generateRid()));
         ridRow.addView(ridEdit, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         ridRow.addView(ridRand);
         root.addView(ridRow);
-        root.addView(spacer(6));
+        root.addView(spacer(10));
 
-        root.addView(label("WK"));
+        root.addView(sectionLabel("WK"));
         LinearLayout wkRow = row();
         EditText wkEdit = field(spoof.getWk());
-        Button wkRand = smallBtn("Random");
+        Button wkRand = smallBtn("RANDOM");
         wkRand.setOnClickListener(v -> wkEdit.setText(spoof.generateWk()));
         wkRow.addView(wkEdit, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         wkRow.addView(wkRand);
         root.addView(wkRow);
-        root.addView(spacer(12));
+        root.addView(spacer(14));
 
-        TextView hint = label("Tap Start Resolving → sign in with Google\n→ the game will log in automatically.");
-        hint.setTextColor(Color.parseColor("#66BB6A"));
+        TextView hint = label("Tap Start Resolving → pick your Google account\n→ the game will log in automatically.");
+        hint.setTextColor(C_ACCENT);
+        hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         root.addView(hint);
-        root.addView(spacer(10));
+        root.addView(spacer(14));
 
         Button resolveBtn = new Button(ctx);
-        resolveBtn.setText("Start Resolving");
+        resolveBtn.setText("START RESOLVING");
         resolveBtn.setTextColor(Color.WHITE);
-        resolveBtn.setBackgroundColor(Color.parseColor("#1B5E20"));
+        resolveBtn.setTypeface(null, Typeface.BOLD);
+        resolveBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        resolveBtn.setElevation(dp(2));
+        GradientDrawable resolveBg = roundedRect(C_ACCENT_DK, C_ACCENT_DK, 0, 10);
+        resolveBtn.setBackground(rippled(resolveBg, C_ACCENT));
+        resolveBtn.setPadding(0, dp(12), 0, dp(12));
         root.addView(resolveBtn);
+        root.addView(spacer(6));
+
+        TextView close = label("CLOSE");
+        close.setTextColor(C_MUTED);
+        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        close.setGravity(Gravity.CENTER);
+        close.setPadding(0, dp(10), 0, dp(4));
+        close.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        root.addView(close);
 
         scroll.addView(root);
-        builder.setView(scroll);
-        builder.setNegativeButton("Close", null);
+        card.addView(scroll);
 
+        AlertDialog.Builder builder = new AlertDialog.Builder(ctx);
+        builder.setView(card);
         AlertDialog dialog = builder.create();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+
+        close.setOnClickListener(v -> dialog.dismiss());
 
         resolveBtn.setOnClickListener(v -> {
             String mac = macEdit.getText().toString().trim();
@@ -151,10 +221,22 @@ public class ZennKuyOverlay {
         }
     }
 
+    // ── Styled building blocks ──────────────────────────────────────────────
+
     private TextView label(String text) {
         TextView tv = new TextView(ctx);
         tv.setText(text);
+        tv.setTextColor(C_TEXT);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        return tv;
+    }
+
+    private TextView sectionLabel(String text) {
+        TextView tv = label(text);
+        tv.setTextColor(C_MUTED);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        tv.setTypeface(null, Typeface.BOLD);
+        tv.setPadding(dp(2), 0, 0, dp(4));
         return tv;
     }
 
@@ -163,18 +245,27 @@ public class ZennKuyOverlay {
         et.setText(value);
         et.setInputType(InputType.TYPE_CLASS_TEXT);
         et.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        et.setTypeface(Typeface.MONOSPACE);
+        et.setTextColor(C_TEXT);
+        et.setHintTextColor(C_MUTED);
         et.setSingleLine(true);
+        et.setBackground(roundedRect(C_FIELD_BG, C_FIELD_BRD, 1, 8));
+        et.setPadding(dp(10), dp(8), dp(10), dp(8));
         return et;
     }
 
     private Button smallBtn(String text) {
         Button b = new Button(ctx);
         b.setText(text);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        b.setTextColor(C_ACCENT);
+        b.setTypeface(null, Typeface.BOLD);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        b.setPadding(dp(10), 0, dp(10), 0);
+        GradientDrawable bg = roundedRect(Color.TRANSPARENT, C_ACCENT, 1, 8);
+        b.setBackground(rippled(bg, C_ACCENT));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.leftMargin = dp(6);
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(34));
+        lp.leftMargin = dp(8);
         b.setLayoutParams(lp);
         return b;
     }
@@ -191,6 +282,29 @@ public class ZennKuyOverlay {
         v.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(dpH)));
         return v;
+    }
+
+    private View divider() {
+        View v = new View(ctx);
+        v.setBackgroundColor(C_BORDER);
+        v.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
+        return v;
+    }
+
+    private GradientDrawable roundedRect(int fill, int stroke, int strokeWidthDp, int radiusDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(fill);
+        if (strokeWidthDp > 0) d.setStroke(dp(strokeWidthDp), stroke);
+        d.setCornerRadius(dp(radiusDp));
+        return d;
+    }
+
+    /** Wraps a drawable in a ripple so buttons feel like a real mod-menu UI. */
+    private Drawable rippled(Drawable content, int rippleColor) {
+        ColorStateList ripple = ColorStateList.valueOf(Color.argb(90,
+                Color.red(rippleColor), Color.green(rippleColor), Color.blue(rippleColor)));
+        return new RippleDrawable(ripple, content, content);
     }
 
     private int dp(int v) {

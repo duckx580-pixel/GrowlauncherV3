@@ -1,59 +1,45 @@
 package com.rtsoft.growtopia;
 
-import android.accounts.Account;
-import android.accounts.AccountManager;
 import android.app.Activity;
 import android.content.Intent;
 import android.opengl.GLSurfaceView;
-import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import java.net.URLEncoder;
-import java.util.UUID;
+import com.google.android.gms.auth.api.signin.GoogleSignIn;
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
+import com.google.android.gms.auth.api.signin.GoogleSignInClient;
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.common.api.ApiException;
+import com.google.android.gms.tasks.Task;
 
 /**
- * Google Sign-In without needing com.gentz.launcher registered in Ubisoft's
- * Google Cloud project.
+ * Google Sign-In via the standard Play Services SDK.
  *
- * Primary path  – Android AccountManager with "audience:server:client_id:"
- *   scope.  Returns a real OpenID Connect ID token via Google Play Services.
- *   No SHA-1 / package registration needed.
- *
- * Fallback path – WebView using response_type=id_token (implicit grant).
- *   The ID token lands in the redirect URL fragment (#id_token=...) and is
- *   extracted before the Growtopia server page ever loads.  This avoids the
- *   "wrong token type" freeze caused by the previous code/flow approach which
- *   got a Growtopia session token instead of a Google ID token.
+ * Requests an ID token directly ({@code requestIdToken(CLIENT_ID)}) using the
+ * Google account picker Play Services provides natively. This is the same
+ * client id and the same API both the official Growtopia app and the
+ * reference mod build use — no WebView involved, so there is no GPU
+ * contention with the game's GLSurfaceView (the previous WebView-based
+ * fallback crashed ~2s into the sign-in page load on some devices/emulators
+ * because the game's GL context and the WebView's Chromium renderer both
+ * fought for the same GPU).
  */
 public class GoogleSignInHelper {
     private static final String TAG = "GoogleSignInHelper";
 
     static final String CLIENT_ID =
         "389994132396-4s6ol46f60831v5blfpci7lnmsdnh8br.apps.googleusercontent.com";
-    private static final String REDIRECT_URI =
-        "https://login.growtopiagame.com/google/callback";
 
-    // Request codes – must stay in sync with Main.onActivityResult
-    static final int RC_ACCOUNT_PICKER = 9001;
-    static final int RC_AUTH_CONSENT   = 9002;
-    static final int RC_GOOGLE_WEB     = 9003;
+    static final int RC_GOOGLE_SIGNIN = 9001;
 
     Activity mainActivity;
+    private GoogleSignInClient client;
 
     // Records the captured Google token and status for the Login Spoof menu
     // (google_token / google_logs) and stores device-identity / ltoken values.
     private final LoginSpoof spoof;
-
-    // Saved from RC_ACCOUNT_PICKER so RC_AUTH_CONSENT can retry fetchIdToken
-    // even when the consent activity doesn't return KEY_ACCOUNT_NAME.
-    private String pendingAccountName = null;
-
-    // The nonce sent to Google in the current sign-in attempt. The returned ID
-    // token must echo it back, otherwise the token is replayed/forged and would
-    // be rejected by Growtopia's server with Error 10.
-    private String pendingNonce = null;
 
     public GoogleSignInHelper(Activity activity) {
         this.mainActivity = activity;
@@ -62,136 +48,42 @@ public class GoogleSignInHelper {
 
     public native void OnSignIn(int code, String token);
     public void Init() {}
-    public void SignOut() {}
+    public void SignOut() {
+        if (client != null) client.signOut();
+    }
 
     // ── Entry point called by the native engine ────────────────────────────
     public void SignIn() {
-        // Skip AccountManager: the 'audience:server:client_id' token it returns
-        // uses the old iss="accounts.google.com" format that Growtopia's server
-        // rejects with Error: 10.  The WebView implicit flow (response_type=id_token)
-        // produces a modern JWT (iss="https://accounts.google.com") that the server
-        // accepts, same as what the real Google Sign-In SDK returns.
-        startWebSignIn();
-    }
+        GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestIdToken(CLIENT_ID)
+                .requestEmail()
+                .build();
+        client = GoogleSignIn.getClient(mainActivity, gso);
 
-    // ── AccountManager token fetch ─────────────────────────────────────────
-    private void fetchIdToken(String accountName) {
-        pendingAccountName = accountName;
-        AccountManager am = AccountManager.get(mainActivity);
-        Account account = new Account(accountName, "com.google");
-
-        am.getAuthToken(
-            account,
-            "audience:server:client_id:" + CLIENT_ID,
-            Bundle.EMPTY,
-            mainActivity,
-            future -> {
-                try {
-                    Bundle result = future.getResult();
-                    String token = result.getString(AccountManager.KEY_AUTHTOKEN);
-                    if (token != null && !token.isEmpty()) {
-                        Log.d(TAG, "AccountManager returned Google ID token");
-                        deliverResult(0, token);
-                    } else {
-                        Intent authIntent = result.getParcelable(AccountManager.KEY_INTENT);
-                        if (authIntent != null) {
-                            mainActivity.runOnUiThread(() ->
-                                mainActivity.startActivityForResult(authIntent, RC_AUTH_CONSENT));
-                        } else {
-                            Log.w(TAG, "No token and no consent intent – falling back to WebView");
-                            startWebSignIn();
-                        }
-                    }
-                } catch (Exception e) {
-                    Log.w(TAG, "getAuthToken failed (" + e.getMessage() + ") – falling back to WebView");
-                    startWebSignIn();
-                }
-            },
-            null
-        );
-    }
-
-    // ── WebView fallback – uses response_type=id_token ────────────────────
-    // The ID token is returned in the URL fragment (#id_token=...) so we
-    // never need to process the Growtopia server's response body.  The engine
-    // needs a real Google ID token, not a Growtopia session token.
-    private void startWebSignIn() {
-        try {
-            String nonce = UUID.randomUUID().toString().replace("-", "");
-            String state = UUID.randomUUID().toString().replace("-", "");
-            pendingNonce = nonce;
-            String url = "https://accounts.google.com/o/oauth2/v2/auth"
-                + "?client_id=" + CLIENT_ID
-                + "&redirect_uri=" + URLEncoder.encode(REDIRECT_URI, "utf-8")
-                + "&response_type=id_token"
-                + "&scope=" + URLEncoder.encode("openid profile email", "utf-8")
-                + "&nonce=" + nonce
-                + "&state=" + state
-                // Force the account chooser so a stale/single session can't
-                // silently return a token for the wrong account.
-                + "&prompt=select_account";
-            Intent intent = new Intent(mainActivity, GoogleWebSignInActivity.class);
-            intent.putExtra("url", url);
-            // The activity validates the returned ID token against these before
-            // handing it back, so a wrong-type or forged token never reaches
-            // native (which would surface as Error 10).
-            intent.putExtra(GoogleWebSignInActivity.EXTRA_EXPECTED_AUD, CLIENT_ID);
-            intent.putExtra(GoogleWebSignInActivity.EXTRA_EXPECTED_NONCE, nonce);
-            mainActivity.startActivityForResult(intent, RC_GOOGLE_WEB);
-        } catch (Exception e) {
-            Log.e(TAG, "WebView sign-in start failed: " + e.getMessage());
-            deliverResult(-1, "");
+        // Force the account chooser so a stale/single cached session can't
+        // silently return a token for the wrong account.
+        if (GoogleSignIn.getLastSignedInAccount(mainActivity) != null) {
+            client.signOut();
         }
+        mainActivity.startActivityForResult(client.getSignInIntent(), RC_GOOGLE_SIGNIN);
     }
 
     // ── onActivityResult dispatcher (called from Main.onActivityResult) ────
     public void handleSignInResult(int requestCode, int resultCode, Intent data) {
-
-        if (requestCode == RC_ACCOUNT_PICKER) {
-            if (resultCode == Activity.RESULT_OK && data != null) {
-                String name = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME);
-                if (name != null && !name.isEmpty()) {
-                    Log.d(TAG, "Account picked: " + name);
-                    fetchIdToken(name);
-                    return;
-                }
-            }
-            Log.d(TAG, "Account picker cancelled – trying WebView");
-            startWebSignIn();
-            return;
-        }
-
-        if (requestCode == RC_AUTH_CONSENT) {
-            if (resultCode == Activity.RESULT_OK) {
-                // Prefer the account name we saved from RC_ACCOUNT_PICKER – the
-                // consent activity often does NOT return KEY_ACCOUNT_NAME, so
-                // relying on it caused a silent fall-through to WebView.
-                String name = null;
-                if (data != null) {
-                    name = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME);
-                }
-                if ((name == null || name.isEmpty()) && pendingAccountName != null) {
-                    name = pendingAccountName;
-                }
-                if (name != null && !name.isEmpty()) {
-                    Log.d(TAG, "Consent granted – retrying fetchIdToken for: " + name);
-                    fetchIdToken(name);
-                    return;
-                }
-            }
-            Log.d(TAG, "Auth consent denied – trying WebView");
-            startWebSignIn();
-            return;
-        }
-
-        if (requestCode == RC_GOOGLE_WEB) {
-            if (resultCode == Activity.RESULT_OK && data != null) {
-                String token = data.getStringExtra(GoogleWebSignInActivity.EXTRA_TOKEN);
-                Log.d(TAG, "WebView sign-in token length=" + (token != null ? token.length() : 0));
-                deliverResult(0, token != null ? token : "");
-            } else {
-                Log.d(TAG, "WebView sign-in cancelled or failed");
+        if (requestCode != RC_GOOGLE_SIGNIN) return;
+        Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
+        try {
+            GoogleSignInAccount account = task.getResult(ApiException.class);
+            String idToken = account.getIdToken();
+            Log.d(TAG, "Google sign-in OK, idToken length=" + (idToken != null ? idToken.length() : 0));
+            deliverResult(0, idToken != null ? idToken : "");
+        } catch (ApiException e) {
+            if (e.getStatusCode() == 12501) {
+                Log.d(TAG, "Google sign-in cancelled by user");
                 deliverResult(-1, "");
+            } else {
+                Log.e(TAG, "Google sign-in failed: " + e);
+                deliverResult(e.getStatusCode(), "");
             }
         }
     }
