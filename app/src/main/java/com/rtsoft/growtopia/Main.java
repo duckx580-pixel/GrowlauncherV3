@@ -36,6 +36,7 @@ public class Main extends SharedActivity {
     public FirebaseCrashlyticsManager firebaseCrashlyticsManager;
     public FirebaseCloudMessageManager firebaseCloudMessageManager = new FirebaseCloudMessageManager();
     public GoogleSignInHelper googleSignInHelper;
+    public ZennKuyOverlay zennKuyOverlay;
     public MAFManager mafManager = new MAFManager(this);
     public UsercentricsManager usercentricsManager = null;
 
@@ -229,6 +230,12 @@ public class Main extends SharedActivity {
         }
 
         JavaInterface.injectActivityJava(this); // Ubisoft bridge init
+
+        // mViewGroup exists once super.onCreate() (SharedActivity) has run;
+        // attach the ZK overlay button to it directly instead of the ImGui
+        // native-render path, which never receives a frame (see GOT hook notes).
+        this.zennKuyOverlay = new ZennKuyOverlay(this);
+        this.zennKuyOverlay.attachTo(mViewGroup);
 
         this.heightProvider = new HeightProvider(this).setHeightListener(height -> {
             OnKeyboardHeightChanged(height);
