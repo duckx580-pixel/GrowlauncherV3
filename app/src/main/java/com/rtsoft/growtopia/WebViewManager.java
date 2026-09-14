@@ -263,6 +263,13 @@ public class WebViewManager {
         @JavascriptInterface
         public void nativeSignIn(String token) {
             Log.d("JSInterface", "nativeSignIn: " + token);
+            // Match v5.57 behaviour: hide the WebView before feeding the token to the engine.
+            // In real GrowLauncher the WebView just goes GONE here and libpowerkuy calls
+            // nativeOnScriptCall from C++; we call it directly since we have no libpowerkuy.
+            android.widget.Toast.makeText(
+                    Main.mainApp, "Logging in with google... wait a moment...",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            this.webviewManager.HideWebView();
             this.webviewManager.nativeOnScriptCall("nativeSignIn", token);
         }
 
@@ -317,7 +324,7 @@ public class WebViewManager {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})();");
             this.listener.OnPageLoaded(url);
         }
 
