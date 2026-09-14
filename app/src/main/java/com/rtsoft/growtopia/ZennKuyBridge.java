@@ -55,9 +55,9 @@ public final class ZennKuyBridge {
      * with Error 10 on debug-signed APKs.
      *
      * <ul>
-     *   <li>Spoof enabled + ltoken present &rarr; inject ltoken immediately, no UI shown.</li>
-     *   <li>Spoof enabled + only refresh token &rarr; exchange for ltoken first, then inject.</li>
-     *   <li>No spoof / no tokens &rarr; replay stored Growtopia login URL via WebView.</li>
+     *   <li>Spoof enabled + ltoken present → inject ltoken immediately, no UI shown.</li>
+     *   <li>Spoof enabled + only refresh token → exchange for ltoken first, then inject.</li>
+     *   <li>No spoof / no tokens → replay stored Growtopia login URL via WebView.</li>
      * </ul>
      */
     public static void startResolving() {
