@@ -143,24 +143,60 @@ public class WebViewManager {
                 if (postData != null) {
                     this.last_packet = new String(postData, java.nio.charset.StandardCharsets.ISO_8859_1);
                 }
-                // If the ltoken spoof is active the native hook handles the login packet;
-                // showing the WebView login page here would double-trigger sign-in.
-                if (isLtokenSpoofActive()) return;
-                ShowWebView();
-                originalURL = url;
-                this.webView.postUrl(url, postData);
+                // When ltoken spoof is active we skip the WebView entirely and feed the
+                // stored credential straight to the engine via nativeOnScriptCall.
+                // libgrowtopia.so handles nativeOnScriptCall the same way regardless of
+                // whether a WebView is alive — it just processes the ("nativeSignIn", ltoken)
+                // pair and continues the connection sequence.
+                LoginSpoof spoof = getActiveSpoof();
+                if (spoof != null) {
+                    String ltoken = spoof.getLtoken();
+                    if (!ltoken.isEmpty()) {
+                        Log.d("WebViewManager", "ltoken spoof active — injecting stored ltoken");
+                        nativeOnScriptCall("nativeSignIn", ltoken);
+                        return;
+                    }
+                    String refreshToken = spoof.getRefreshToken();
+                    if (!refreshToken.isEmpty()) {
+                        // No ltoken yet, but we have a refresh token — exchange it first.
+                        Log.d("WebViewManager", "ltoken empty, exchanging refresh token");
+                        spoof.exchangeStoredRefreshToken(new LoginSpoof.ExchangeCallback() {
+                            @Override public void onSuccess(String lt) {
+                                Log.d("WebViewManager", "refresh→ltoken OK, injecting");
+                                nativeOnScriptCall("nativeSignIn", lt);
+                            }
+                            @Override public void onFailure(String msg, String raw) {
+                                Log.w("WebViewManager", "refresh→ltoken failed: " + msg + " — falling back to WebView");
+                                baseActivity.runOnUiThread(() -> showAndPostUrl(url, postData));
+                            }
+                        });
+                        return;
+                    }
+                    // Spoof enabled but no tokens at all — fall through to normal WebView.
+                    Log.w("WebViewManager", "ltoken spoof enabled but no tokens stored; showing WebView");
+                }
+                showAndPostUrl(url, postData);
             })
         );
     }
 
-    // Returns true when libzennkuy has an active ltoken ready to inject.
-    private static boolean isLtokenSpoofActive() {
+    private void showAndPostUrl(String url, byte[] postData) {
+        ShowWebView();
+        originalURL = url;
+        this.webView.postUrl(url, postData);
+    }
+
+    /**
+     * Returns a {@link LoginSpoof} if the spoof feature is enabled, or {@code null} if it is
+     * disabled. Swallows any exception so a broken prefs state never crashes the login flow.
+     */
+    private static LoginSpoof getActiveSpoof() {
         try {
-            if (Main.mainApp == null) return false;
+            if (Main.mainApp == null) return null;
             LoginSpoof s = new LoginSpoof(Main.mainApp);
-            return s.isEnabled() && !s.getLtoken().isEmpty();
+            return s.isEnabled() ? s : null;
         } catch (Exception e) {
-            return false;
+            return null;
         }
     }
 
@@ -281,7 +317,7 @@ public class WebViewManager {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()");
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
             this.listener.OnPageLoaded(url);
         }
 
