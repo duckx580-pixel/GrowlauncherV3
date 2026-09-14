@@ -110,13 +110,26 @@ public class Main extends SharedActivity {
             String info = data.getQueryParameter("info");
             String token = data.getQueryParameter("token");
             if (info != null || token != null) {
-                // UbiConnect/CSTS OAuth redirect: grow://growtopia?info=...&token=...
-                // Pass the OAuth callback to the game engine.
-                final String payload = "info=" + URLEncoder.encode(info != null ? info : "")
-                        + "&token=" + URLEncoder.encode(token != null ? token : "");
-                Log.d("Main", "CSTS redirect received, payload=" + payload);
+                // Google OAuth redirect: grow://growtopia?info=...&token=...
+                // The Growtopia server at login.growtopiagame.com/google/callback exchanges
+                // the OAuth code and redirects here with the account token.
+                final String safeInfo  = info  != null ? info  : "";
+                final String safeToken = token != null ? token : "";
+                final String payload = "info=" + URLEncoder.encode(safeInfo)
+                        + "&token=" + URLEncoder.encode(safeToken);
+                Log.d("Main", "Google OAuth redirect received, token length=" + safeToken.length());
+
+                // 1. Deliver to the game engine (libgrowtopia.so deep-link handler).
                 if (mGLView != null) {
                     mGLView.post(() -> NativeAppInterface.OnDeepLinkProcess(payload));
+                }
+
+                // 2. Also deliver via the GoogleSignInHelper path so libzennkuy.so receives
+                //    OnSignIn(0, token) — same signal it would get from the Android SDK on a
+                //    production build. The token here is the Growtopia ltoken from the server,
+                //    which is exactly what nativeSignIn / OnSignIn expects.
+                if (!safeToken.isEmpty() && googleSignInHelper != null) {
+                    googleSignInHelper.deliverResult(0, safeToken);
                 }
             } else {
                 HandleDeeplink(intent);

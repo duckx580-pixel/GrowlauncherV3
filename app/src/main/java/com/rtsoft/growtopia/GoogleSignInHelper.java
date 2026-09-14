@@ -2,29 +2,32 @@ package com.rtsoft.growtopia;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.net.Uri;
 import android.opengl.GLSurfaceView;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import com.google.android.gms.auth.api.signin.GoogleSignIn;
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
-import com.google.android.gms.auth.api.signin.GoogleSignInClient;
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
-import com.google.android.gms.common.api.ApiException;
-import com.google.android.gms.tasks.Task;
-
 /**
- * Google Sign-In via the standard Play Services SDK.
+ * Google Sign-In — Chrome-direct flow, matching real GrowLauncher v5.57.
  *
- * Requests an ID token directly ({@code requestIdToken(CLIENT_ID)}) using the
- * Google account picker Play Services provides natively. This is the same
- * client id and the same API both the official Growtopia app and the
- * reference mod build use — no WebView involved, so there is no GPU
- * contention with the game's GLSurfaceView (the previous WebView-based
- * fallback crashed ~2s into the sign-in page load on some devices/emulators
- * because the game's GL context and the WebView's Chromium renderer both
- * fought for the same GPU).
+ * <p><b>Why not the Android Google Sign-In SDK?</b><br>
+ * The Android SDK ({@code GoogleSignIn.getClient(...).getSignInIntent()}) always fails with
+ * {@code DEVELOPER_ERROR} (status code 10) on debug-signed APKs because the SHA-1 fingerprint
+ * is not registered in the Google Cloud project. Real GrowLauncher v5.57 (libPowerKuy.so) never
+ * uses that SDK — its native layer opens Chrome directly to the Growtopia OAuth URL the game
+ * engine already stored in {@link WebViewManager#last_url} when it called {@code LoadURLPost}.
+ *
+ * <p><b>Flow (Chrome path):</b><br>
+ * {@code SignIn()} → open Chrome to {@code last_url} ({@code accounts.google.com/v3/signin/...})
+ * → user authenticates → Google redirects to {@code login.growtopiagame.com/google/callback}
+ * → Growtopia server redirects to {@code grow://growtopia?info=...&token=...}
+ * → Android delivers to {@link Main#onNewIntent} → {@link Main#handleIntent}
+ * → {@link NativeAppInterface#OnDeepLinkProcess} on the GL thread.
+ *
+ * <p><b>Fallback (WebView path):</b><br>
+ * If {@code last_url} is not yet populated (engine hasn't called {@code LoadURLPost}),
+ * {@link ZennKuyBridge#startResolving()} is called, which shows the in-app WebView login flow.
  */
 public class GoogleSignInHelper {
     private static final String TAG = "GoogleSignInHelper";
@@ -32,13 +35,12 @@ public class GoogleSignInHelper {
     static final String CLIENT_ID =
         "389994132396-4s6ol46f60831v5blfpci7lnmsdnh8br.apps.googleusercontent.com";
 
+    // Kept for onActivityResult dispatch wiring in Main (harmless if never triggered).
     static final int RC_GOOGLE_SIGNIN = 9001;
 
     Activity mainActivity;
-    private GoogleSignInClient client;
 
-    // Records the captured Google token and status for the Login Spoof menu
-    // (google_token / google_logs) and stores device-identity / ltoken values.
+    // Records the captured token/status for the Login Spoof menu.
     private final LoginSpoof spoof;
 
     public GoogleSignInHelper(Activity activity) {
@@ -48,60 +50,68 @@ public class GoogleSignInHelper {
 
     public native void OnSignIn(int code, String token);
     public void Init() {}
-    public void SignOut() {
-        if (client != null) client.signOut();
-    }
+    public void SignOut() {}
 
     // ── Entry point called by the native engine ────────────────────────────
+    /**
+     * Opens Chrome directly to the Growtopia Google OAuth URL — no Android SDK, no Error 10.
+     *
+     * <p>The URL ({@code accounts.google.com/v3/signin/accountchooser?...}) was stored by the
+     * game engine in {@link WebViewManager#last_url} when it called {@code LoadURLPost}. We just
+     * pass it straight to Chrome via {@code ACTION_VIEW}, exactly as libPowerKuy.so does in v5.57.
+     */
     public void SignIn() {
-        GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestIdToken(CLIENT_ID)
-                .requestEmail()
-                .build();
-        client = GoogleSignIn.getClient(mainActivity, gso);
-
-        // Force the account chooser so a stale/single cached session can't
-        // silently return a token for the wrong account.
-        if (GoogleSignIn.getLastSignedInAccount(mainActivity) != null) {
-            client.signOut();
+        if (Main.mainApp == null) {
+            Log.e(TAG, "SignIn: mainApp is null");
+            return;
         }
-        mainActivity.startActivityForResult(client.getSignInIntent(), RC_GOOGLE_SIGNIN);
+
+        // Grab the OAuth URL the engine already stored.
+        String oauthUrl = null;
+        WebViewManager wvm = Main.mainApp.webViewManager;
+        if (wvm != null && wvm.last_url != null && !wvm.last_url.isEmpty()) {
+            oauthUrl = wvm.last_url;
+        }
+
+        final String urlToOpen = oauthUrl;
+
+        mainActivity.runOnUiThread(() -> {
+            if (urlToOpen != null) {
+                // ── Chrome path: open the Google OAuth page in the external browser ──
+                Log.d(TAG, "SignIn: opening OAuth URL in Chrome (bypassing Android SDK)");
+                spoof.setGoogleLogs("Opening Chrome OAuth: " + urlToOpen.substring(0, Math.min(80, urlToOpen.length())) + "…");
+                try {
+                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(urlToOpen));
+                    browserIntent.addCategory(Intent.CATEGORY_BROWSABLE);
+                    mainActivity.startActivity(browserIntent);
+                } catch (Exception e) {
+                    Log.e(TAG, "SignIn: could not open Chrome — falling back to WebView: " + e);
+                    spoof.setGoogleLogs("Chrome open failed, using WebView: " + e.getMessage());
+                    ZennKuyBridge.startResolving();
+                }
+            } else {
+                // ── Fallback: last_url not yet set — use in-app WebView login ──
+                Log.d(TAG, "SignIn: last_url not available — falling back to WebView login");
+                spoof.setGoogleLogs("last_url not set, using WebView login");
+                ZennKuyBridge.startResolving();
+            }
+        });
     }
 
     // ── onActivityResult dispatcher (called from Main.onActivityResult) ────
+    // The Android SDK is no longer used, so this will never be triggered in
+    // normal operation. Kept so Main.onActivityResult wiring compiles.
     public void handleSignInResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode != RC_GOOGLE_SIGNIN) return;
-        Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
-        try {
-            GoogleSignInAccount account = task.getResult(ApiException.class);
-            String idToken = account.getIdToken();
-            Log.d(TAG, "Google sign-in OK, idToken length=" + (idToken != null ? idToken.length() : 0));
-            deliverResult(0, idToken != null ? idToken : "");
-        } catch (ApiException e) {
-            if (e.getStatusCode() == 12501) {
-                Log.d(TAG, "Google sign-in cancelled by user");
-                deliverResult(-1, "");
-            } else {
-                Log.e(TAG, "Google sign-in failed: " + e);
-                // Error 10 = DEVELOPER_ERROR (SHA-1 mismatch on debug builds).
-                // libzennkuy.so does NOT have libpowerkuy's built-in WebView fallback,
-                // so Java must trigger it. Mirror what v5.57's libpowerkuy does on
-                // Error 10: automatically replay the stored Growtopia login URL via
-                // WebView instead of leaving the user stuck on "Getting server address…"
-                if (e.getStatusCode() == 10) {
-                    Log.d(TAG, "Error 10 detected — auto-triggering WebView login fallback");
-                    if (Main.mainApp != null) {
-                        Main.mainApp.runOnUiThread(ZennKuyBridge::startResolving);
-                    }
-                }
-                deliverResult(e.getStatusCode(), "");
-            }
-        }
+        // No-op: we no longer use startActivityForResult / Android SDK.
+        Log.d(TAG, "handleSignInResult called (SDK no longer used) — ignoring");
     }
 
     // ── Token delivery on the GL thread ───────────────────────────────────
-    private void deliverResult(int code, String token) {
-        // Record what happened for the Login Spoof "Google" menu section.
+    // Used only if some external path calls OnSignIn directly (e.g. ltoken spoof).
+    private static final int MAX_DELIVER_RETRIES = 40; // ~4s at 100ms
+    private final Handler deliverHandler = new Handler(Looper.getMainLooper());
+
+    public void deliverResult(int code, String token) {
         if (code == 0 && token != null && !token.isEmpty()) {
             spoof.setGoogleToken(token);
             spoof.setGoogleLogs("Google sign-in OK (token length=" + token.length() + ")");
@@ -110,13 +120,6 @@ public class GoogleSignInHelper {
         }
         deliverToGl(code, token, 0);
     }
-
-    // The GL view may not exist yet when the sign-in activity returns (the
-    // engine tears it down while another activity is on top). Retry briefly so
-    // native always receives OnSignIn instead of the login screen hanging on
-    // "Getting server address..." forever.
-    private static final int MAX_DELIVER_RETRIES = 40; // ~4s at 100ms
-    private final Handler deliverHandler = new Handler(Looper.getMainLooper());
 
     private void deliverToGl(int code, String token, int attempt) {
         GLSurfaceView glView = SharedActivity.mGLView;
@@ -128,11 +131,9 @@ public class GoogleSignInHelper {
             deliverHandler.postDelayed(() -> deliverToGl(code, token, attempt + 1), 100);
             return;
         }
-        final int c = code;
-        final String t = token;
         glView.queueEvent(() -> {
             try {
-                OnSignIn(c, t);
+                OnSignIn(code, token);
             } catch (UnsatisfiedLinkError e) {
                 Log.w(TAG, "OnSignIn native unavailable: " + e.getMessage());
             }
