@@ -83,6 +83,17 @@ public class GoogleSignInHelper {
                 deliverResult(-1, "");
             } else {
                 Log.e(TAG, "Google sign-in failed: " + e);
+                // Error 10 = DEVELOPER_ERROR (SHA-1 mismatch on debug builds).
+                // libzennkuy.so does NOT have libpowerkuy's built-in WebView fallback,
+                // so Java must trigger it. Mirror what v5.57's libpowerkuy does on
+                // Error 10: automatically replay the stored Growtopia login URL via
+                // WebView instead of leaving the user stuck on "Getting server address…"
+                if (e.getStatusCode() == 10) {
+                    Log.d(TAG, "Error 10 detected — auto-triggering WebView login fallback");
+                    if (Main.mainApp != null) {
+                        Main.mainApp.runOnUiThread(ZennKuyBridge::startResolving);
+                    }
+                }
                 deliverResult(e.getStatusCode(), "");
             }
         }
