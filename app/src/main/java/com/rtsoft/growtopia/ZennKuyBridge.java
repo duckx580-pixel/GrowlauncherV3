@@ -47,20 +47,24 @@ public final class ZennKuyBridge {
      *
      * <p>When the ltoken spoof is enabled the spoof credential is injected directly into the
      * game engine via {@link WebViewManager#nativeOnScriptCall}, bypassing Google OAuth
-     * entirely (which would otherwise fail with Error 10 if the APK signing certificate does
-     * not match the OAuth client ID registration).
+     * entirely.  When no spoof credential is available the WebView web-OAuth flow is used
+     * (replaying the Growtopia login URL that the engine already stored in
+     * {@link WebViewManager#last_url} / {@link WebViewManager#last_packet}).  This opens the
+     * real Google accounts website in the in-app WebView — identical to the real GrowLauncher
+     * v5.57 behaviour — and never touches the Android Google Sign-In SDK, which would fail
+     * with Error 10 on debug-signed APKs.
      *
      * <ul>
-     *   <li>Spoof enabled + ltoken present → inject ltoken immediately, no UI dialog shown.</li>
-     *   <li>Spoof enabled + only refresh token → exchange for ltoken first, then inject.</li>
-     *   <li>Spoof enabled but no tokens, or spoof disabled → fall through to Google OAuth.</li>
+     *   <li>Spoof enabled + ltoken present &rarr; inject ltoken immediately, no UI shown.</li>
+     *   <li>Spoof enabled + only refresh token &rarr; exchange for ltoken first, then inject.</li>
+     *   <li>No spoof / no tokens &rarr; replay stored Growtopia login URL via WebView.</li>
      * </ul>
      */
     public static void startResolving() {
         try {
             if (Main.mainApp == null) return;
 
-            // Check ltoken spoof before touching Google OAuth.
+            // Check ltoken spoof before touching any OAuth flow.
             LoginSpoof spoof = spoofIfEnabled();
             if (spoof != null) {
                 String ltoken = spoof.getLtoken();
@@ -79,18 +83,16 @@ public final class ZennKuyBridge {
                             injectLtoken(lt);
                         }
                         @Override public void onFailure(String msg, String raw) {
-                            Log.w(TAG, "startResolving: refresh→ltoken failed (" + msg + "), falling back to Google OAuth");
-                            triggerGoogleSignIn();
+                            Log.w(TAG, "startResolving: refresh→ltoken failed (" + msg + "), falling back to WebView login");
+                            triggerWebViewLogin();
                         }
                     });
                     return;
                 }
-                // Spoof enabled but no tokens stored yet — fall through to Google OAuth
-                // so the user can get a Google token to seed the spoof menu with.
-                Log.w(TAG, "startResolving: spoof enabled but no tokens; using Google OAuth");
+                Log.w(TAG, "startResolving: spoof enabled but no tokens; using WebView login");
             }
 
-            triggerGoogleSignIn();
+            triggerWebViewLogin();
         } catch (Exception e) {
             Log.e(TAG, "startResolving: " + e.getMessage());
         }
@@ -124,16 +126,36 @@ public final class ZennKuyBridge {
         }
     }
 
-    /** Opens the Google account-picker activity — the pre-existing OAuth flow. */
-    private static void triggerGoogleSignIn() {
+    /**
+     * Opens Google sign-in via the Growtopia WebView login flow.
+     *
+     * <p>Replays the login URL that the game engine previously stored in
+     * {@link WebViewManager#last_url} / {@link WebViewManager#last_packet}.  The URL redirects
+     * through {@code accounts.google.com} web OAuth inside the in-app WebView — exactly like
+     * real GrowLauncher v5.57 — without using the Android Google Sign-In SDK (which requires a
+     * matching SHA-1 cert and fails with Error 10 on debug builds).
+     */
+    private static void triggerWebViewLogin() {
         Main.mainApp.runOnUiThread(() -> {
             try {
-                GoogleSignInHelper helper = Main.mainApp.googleSignInHelper;
-                if (helper != null) {
-                    helper.SignIn();
+                WebViewManager wvm = Main.mainApp.webViewManager;
+                if (wvm == null) {
+                    Log.e(TAG, "triggerWebViewLogin: webViewManager is null");
+                    return;
+                }
+                String url = wvm.last_url;
+                String packet = wvm.last_packet;
+                if (url != null && !url.isEmpty() && packet != null && !packet.isEmpty()) {
+                    Log.d(TAG, "triggerWebViewLogin: replaying stored login URL via WebView");
+                    wvm.LoadURLPost(url, packet.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1), false);
+                } else {
+                    // Engine hasn't called LoadURLPost yet — show the WebView so the game
+                    // can trigger it on its own when the user taps the Google button.
+                    Log.w(TAG, "triggerWebViewLogin: no stored URL yet, showing WebView directly");
+                    wvm.ShowWebView();
                 }
             } catch (Exception e) {
-                Log.e(TAG, "triggerGoogleSignIn: " + e.getMessage());
+                Log.e(TAG, "triggerWebViewLogin: " + e.getMessage());
             }
         });
     }
