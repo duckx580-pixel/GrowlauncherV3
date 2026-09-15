@@ -1,6 +1,7 @@
 package com.rtsoft.growtopia;
 
 import android.util.Log;
+// AppLogger is in the same package — no import needed
 
 public final class ZennKuyBridge {
     private static final String TAG = "ZennKuyBridge";
@@ -47,14 +48,17 @@ public final class ZennKuyBridge {
      *
      * <p>When the ltoken spoof is enabled the spoof credential is injected directly into the
      * game engine via {@link WebViewManager#nativeOnScriptCall}, bypassing Google OAuth
-     * entirely.  When no spoof credential is available the dashboard WebView flow is used
-     * (loading the Growtopia dashboard URL which calls NativeApp.nativeSignIn() from JS).
-     * This is the same mechanism Genta Hax v5.53 "Start Resolving" uses.
+     * entirely.  When no spoof credential is available the WebView web-OAuth flow is used
+     * (replaying the Growtopia login URL that the engine already stored in
+     * {@link WebViewManager#last_url} / {@link WebViewManager#last_packet}).  This opens the
+     * real Google accounts website in the in-app WebView — identical to the real GrowLauncher
+     * v5.57 behaviour — and never touches the Android Google Sign-In SDK, which would fail
+     * with Error 10 on debug-signed APKs.
      *
      * <ul>
-     *   <li>Spoof enabled + ltoken present &rarr; inject ltoken immediately, no UI shown.</li>
-     *   <li>Spoof enabled + only refresh token &rarr; exchange for ltoken first, then inject.</li>
-     *   <li>No spoof / no tokens &rarr; load dashboard URL via WebView.</li>
+     *   <li>Spoof enabled + ltoken present → inject ltoken immediately, no UI shown.</li>
+     *   <li>Spoof enabled + only refresh token → exchange for ltoken first, then inject.</li>
+     *   <li>No spoof / no tokens → replay stored Growtopia login URL via WebView.</li>
      * </ul>
      */
     public static void startResolving() {
@@ -80,13 +84,13 @@ public final class ZennKuyBridge {
                             injectLtoken(lt);
                         }
                         @Override public void onFailure(String msg, String raw) {
-                            Log.w(TAG, "startResolving: refresh→ltoken failed (" + msg + "), falling back to dashboard login");
+                            Log.w(TAG, "startResolving: refresh→ltoken failed (" + msg + "), falling back to WebView login");
                             triggerWebViewLogin();
                         }
                     });
                     return;
                 }
-                Log.w(TAG, "startResolving: spoof enabled but no tokens; using dashboard login");
+                Log.w(TAG, "startResolving: spoof enabled but no tokens; using WebView login");
             }
 
             triggerWebViewLogin();
@@ -157,6 +161,7 @@ public final class ZennKuyBridge {
                 }
                 // Load the dashboard URL — its JS calls NativeApp.nativeSignIn(token) on success.
                 // No grow:// redirect is involved, so the official app cannot intercept the token.
+                AppLogger.log(TAG, "triggerWebViewLogin: loading Growtopia dashboard URL");
                 Log.d(TAG, "triggerWebViewLogin: loading dashboard URL");
                 wvm.LoadURL(DASHBOARD_URL, false);
             } catch (Exception e) {

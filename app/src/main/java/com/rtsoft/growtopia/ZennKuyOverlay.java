@@ -1,6 +1,8 @@
 package com.rtsoft.growtopia;
 
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
@@ -168,6 +170,19 @@ public class ZennKuyOverlay {
         resolveBtn.setBackground(rippled(resolveBg, C_ACCENT));
         resolveBtn.setPadding(0, dp(12), 0, dp(12));
         root.addView(resolveBtn);
+        root.addView(spacer(10));
+
+        // ── Debug log viewer ─────────────────────────────────────────────
+        LinearLayout logRow = row();
+        Button logsBtn = smallBtn("VIEW LOGS");
+        logsBtn.setOnClickListener(v -> showLogs());
+        Button clearBtn = smallBtn("CLEAR LOGS");
+        clearBtn.setTextColor(Color.parseColor("#E74C3C"));
+        GradientDrawable clearBg = roundedRect(Color.TRANSPARENT, Color.parseColor("#E74C3C"), 1, 8);
+        clearBtn.setBackground(rippled(clearBg, Color.parseColor("#E74C3C")));
+        logRow.addView(logsBtn);
+        logRow.addView(clearBtn);
+        root.addView(logRow);
         root.addView(spacer(6));
 
         TextView close = label("CLOSE");
@@ -205,6 +220,35 @@ public class ZennKuyOverlay {
         });
 
         dialog.show();
+    }
+
+    private void showLogs() {
+        final String logs = AppLogger.getLogs();
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(ctx);
+        TextView tv = new TextView(ctx);
+        tv.setText(logs);
+        tv.setTextColor(C_TEXT);
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 10);
+        tv.setTypeface(android.graphics.Typeface.MONOSPACE);
+        tv.setPadding(dp(12), dp(12), dp(12), dp(12));
+        sv.setBackgroundColor(C_FIELD_BG);
+        sv.addView(tv);
+        // Scroll to bottom — newest entries are at the bottom
+        sv.post(() -> sv.fullScroll(android.view.View.FOCUS_DOWN));
+
+        AlertDialog.Builder b = new AlertDialog.Builder(ctx);
+        b.setTitle("Login Debug Logs");
+        b.setView(sv);
+        b.setPositiveButton("CLOSE", null);
+        b.setNeutralButton("COPY ALL", (d, w) -> {
+            ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("ZK Logs", logs));
+                Toast.makeText(ctx, "Logs copied to clipboard", Toast.LENGTH_SHORT).show();
+            }
+        });
+        b.show();
     }
 
     private void startResolving() {
