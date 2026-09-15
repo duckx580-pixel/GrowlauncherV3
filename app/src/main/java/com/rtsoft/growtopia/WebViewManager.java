@@ -152,7 +152,7 @@ public class WebViewManager {
                 if (spoof != null) {
                     String ltoken = spoof.getLtoken();
                     if (!ltoken.isEmpty()) {
-                        Log.d("WebViewManager", "ltoken spoof active — injecting stored ltoken");
+                        AppLogger.log("WebViewManager", "ltoken spoof active — injecting stored ltoken directly");
                         nativeOnScriptCall("nativeSignIn", ltoken);
                         return;
                     }
@@ -186,6 +186,7 @@ public class WebViewManager {
                 // ltoken lives in the "info" param (not "token"), we miss it, and the engine
                 // times out → "Please try login again."  Storing last_url/last_packet is enough
                 // for ZennKuyBridge to have the fallback URL if needed.
+                AppLogger.log("WebViewManager", "LoadURLPost: no spoof — stored URL, waiting for SignIn() to load dashboard");
                 Log.d("WebViewManager", "LoadURLPost: no spoof active — storing URL, deferring WebView to SignIn()");
             })
         );
@@ -214,18 +215,22 @@ public class WebViewManager {
     public void SetFrame(final float x, final float y, final float w, final float h) {
         this.webViewWorkExecutor.execute(() ->
             this.baseActivity.runOnUiThread(() -> {
+                WebView wv = this.webView;
+                if (wv == null) return; // WebView not yet created — engine called SetFrame too early
                 RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams((int) w, (int) h);
                 lp.setMargins((int) x, (int) y, 0, 0);
-                this.webView.setLayoutParams(lp);
+                wv.setLayoutParams(lp);
             })
         );
     }
 
     public void SetBgColor(final int r, final int g, final int b, final int a) {
         this.webViewWorkExecutor.execute(() ->
-            this.baseActivity.runOnUiThread(() ->
-                this.webView.setBackgroundColor(Color.argb(r, g, b, a))
-            )
+            this.baseActivity.runOnUiThread(() -> {
+                WebView wv = this.webView;
+                if (wv == null) return;
+                wv.setBackgroundColor(Color.argb(r, g, b, a));
+            })
         );
     }
 
@@ -273,6 +278,7 @@ public class WebViewManager {
 
         @JavascriptInterface
         public void nativeSignIn(String token) {
+            AppLogger.log("JSInterface", "nativeSignIn callback fired — token len=" + (token != null ? token.length() : "null"));
             Log.d("JSInterface", "nativeSignIn: " + token);
             // Match v5.57 behaviour: hide the WebView before feeding the token to the engine.
             // In real GrowLauncher the WebView just goes GONE here and libpowerkuy calls
@@ -356,6 +362,7 @@ public class WebViewManager {
             if (url.startsWith("grow://")) {
                 // grow:// is the Growtopia custom scheme — the game's own deep-link format.
                 // Consume it here so it never becomes an Android Intent.
+                AppLogger.log("WebView", "grow:// intercepted — url=" + url);
                 Log.d("WebView", "grow:// intercepted — full url=" + url);
                 try {
                     Uri uri = Uri.parse(url);
@@ -366,12 +373,14 @@ public class WebViewManager {
                     if (token == null || token.isEmpty()) {
                         token = uri.getQueryParameter("info");
                         if (token != null && !token.isEmpty()) {
+                            AppLogger.log("WebView", "grow:// token found in 'info' param (len=" + token.length() + ")");
                             Log.d("WebView", "grow:// — token was in 'info' param (len=" + token.length() + ")");
                         }
                     }
                     if (token != null && !token.isEmpty()) {
                         final String safeToken = token;
                         baseActivity.runOnUiThread(() -> {
+                            AppLogger.log("WebView", "grow:// delivering token to engine (len=" + safeToken.length() + ") — LOGIN SHOULD COMPLETE");
                             Log.d("WebView", "grow:// delivering token to engine (len=" + safeToken.length() + ")");
                             android.widget.Toast.makeText(Main.mainApp,
                                     "Logging in with google... wait a moment...",
@@ -380,6 +389,7 @@ public class WebViewManager {
                             WebViewManager.this.nativeOnScriptCall("nativeSignIn", safeToken);
                         });
                     } else {
+                        AppLogger.warn("WebView", "grow:// had NO token or info param — login will fail! url=" + url);
                         Log.w("WebView", "grow:// redirect had no token or info param — url=" + url);
                     }
                 } catch (Exception e) {
@@ -453,11 +463,11 @@ public class WebViewManager {
     }
 
     private boolean isStaleWebViewDataDirectory(String name) {
-        return name.startsWith("app_webview_") && name.matches(".*\\.\\d+$");
+        return name.startsWith("app_webview_") && name.matches(".*\.\\d+$");
     }
 
     private boolean isStaleWebViewCacheDirectory(String name) {
-        return name.startsWith("webview_") && name.matches(".*\\.\\d+$");
+        return name.startsWith("webview_") && name.matches(".*\.\\d+$");
     }
 
     private void safeDeleteDatabase(String name) {
