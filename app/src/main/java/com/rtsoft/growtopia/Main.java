@@ -111,25 +111,29 @@ public class Main extends SharedActivity {
             String token = data.getQueryParameter("token");
             if (info != null || token != null) {
                 // Google OAuth redirect: grow://growtopia?info=...&token=...
-                // The Growtopia server at login.growtopiagame.com/google/callback exchanges
-                // the OAuth code and redirects here with the account token.
+                // Chrome followed the grow:// redirect after Google authentication.
+                // Deliver the full payload to the game engine — equivalent to
+                // Real Growlauncher's JNICall.notifyValueChanged(5, "google_redirect_callback", payload).
                 final String safeInfo  = info  != null ? info  : "";
                 final String safeToken = token != null ? token : "";
                 final String payload = "info=" + URLEncoder.encode(safeInfo)
                         + "&token=" + URLEncoder.encode(safeToken);
                 Log.d("Main", "Google OAuth redirect received, token length=" + safeToken.length());
 
-                // 1. Deliver to the game engine (libgrowtopia.so deep-link handler).
-                if (mGLView != null) {
-                    mGLView.post(() -> NativeAppInterface.OnDeepLinkProcess(payload));
+                // Mark token as delivered so ZennKuyBridge.startResolving() does not
+                // reload the dashboard URL if the engine retries SignIn() after this.
+                // Without this flag, the retry loads the dashboard → second nativeSignIn
+                // fires → engine sees a duplicate token → "please try login again".
+                if (!safeToken.isEmpty()) {
+                    ZennKuyBridge.sTokenDelivered = true;
                 }
 
-                // 2. Also deliver via the GoogleSignInHelper path so libzennkuy.so receives
-                //    OnSignIn(0, token) — same signal it would get from the Android SDK on a
-                //    production build. The token here is the Growtopia ltoken from the server,
-                //    which is exactly what nativeSignIn / OnSignIn expects.
-                if (!safeToken.isEmpty() && googleSignInHelper != null) {
-                    googleSignInHelper.deliverResult(0, safeToken);
+                // Single delivery path: OnDeepLinkProcess receives the full info+token
+                // payload in the same format the Growtopia server sends.
+                // Do NOT also call googleSignInHelper.deliverResult() — that would deliver
+                // the token a second time in a different format and confuse the engine.
+                if (mGLView != null) {
+                    mGLView.post(() -> NativeAppInterface.OnDeepLinkProcess(payload));
                 }
             } else {
                 HandleDeeplink(intent);
@@ -185,12 +189,12 @@ public class Main extends SharedActivity {
         }
     }
 
+    // Matches Real Growlauncher: only super.onActivityResult, no SDK dispatch.
+    // googleSignInHelper.handleSignInResult() was a no-op (SDK not used) so
+    // removing it has no functional effect — just eliminates dead code.
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (googleSignInHelper != null) {
-            googleSignInHelper.handleSignInResult(requestCode, resultCode, data);
-        }
     }
 
     @Override
