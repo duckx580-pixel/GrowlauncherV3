@@ -91,7 +91,11 @@ public class WebViewManager {
         this.webView.removeJavascriptInterface("NativeApp");
         this.webView.destroy();
         this.webView = null;
-        ClearCookieWebData();
+        // NOTE: ClearCookieWebData() is intentionally NOT called here.
+        // Clearing cookies on hide wipes Google auth cookies before the next
+        // auth attempt starts, causing "Continue with Google" to hang on retry.
+        // Cookies are cleared at the top of LoadURLPost (no-spoof path) instead,
+        // so they are only nuked when a brand-new auth session begins.
     }
 
     public synchronized void ShowWebView() {
@@ -175,12 +179,14 @@ public class WebViewManager {
                     return;
                 }
 
-                // No spoof — reset delivery flag and show WebView with the OAuth URL.
-                // This matches real GrowLauncher v5.57 behaviour: the engine calls
-                // LoadURLPost first, then SignIn().  Resetting sTokenDelivered here ensures
-                // a fresh auth session — if the user retaps Play Online after a failed
-                // attempt the flag from the previous attempt won't block the next one.
+                // No spoof — new auth session starting.
+                // Clear cookies NOW (before showing WebView) so stale Growtopia
+                // session data from a previous attempt cannot interfere with the
+                // fresh OAuth flow.  Clearing here (not in HideWebView/DestroyWebView)
+                // means Google auth cookies survive the hide→show cycle on retry,
+                // so "Continue with Google" works on second and subsequent attempts.
                 ZennKuyBridge.sTokenDelivered = false;
+                ClearCookieWebData();
                 AppLogger.log("WebViewManager", "LoadURLPost: showing WebView with OAuth URL");
                 Log.d("WebViewManager", "LoadURLPost: showing WebView (v5.57 path)");
                 showAndPostUrl(url, postData);
