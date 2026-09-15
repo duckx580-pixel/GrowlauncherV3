@@ -116,19 +116,22 @@ public class Main extends SharedActivity {
                 final String safeToken = token != null ? token : "";
                 final String payload = "info=" + URLEncoder.encode(safeInfo)
                         + "&token=" + URLEncoder.encode(safeToken);
-                Log.d("Main", "Google OAuth redirect received, token length=" + safeToken.length());
+                Log.d("Main", "Google OAuth redirect received, token length=" + safeToken.length()
+                        + " info length=" + safeInfo.length());
 
                 // Mark token as delivered so ZennKuyBridge.startResolving() does not
                 // reload the dashboard URL if the engine retries SignIn() after this.
-                if (!safeToken.isEmpty()) {
+                // Check both safeToken and safeInfo — Growtopia sometimes delivers the
+                // ltoken in the "info" param instead of "token".
+                if (!safeToken.isEmpty() || !safeInfo.isEmpty()) {
                     ZennKuyBridge.sTokenDelivered = true;
                 }
 
                 // Dismiss the WebView overlay.
-                // When openAsResult() launches Chrome externally, the grow:// redirect
+                // When nativeSignIn("") launches Chrome externally, the grow:// redirect
                 // arrives here via onNewIntent — it bypasses WebViewManager.handleGrowUrl()
                 // which normally calls HideWebView(). Without this call the WebView stays
-                // on top of the game after token delivery, causing the "stuck on please wait" UI.
+                // on top of the game after token delivery.
                 webViewManager.HideWebView();
 
                 // Single delivery path: OnDeepLinkProcess receives the full info+token payload.

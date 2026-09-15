@@ -9,10 +9,8 @@ import android.net.http.SslError;
 import android.os.Looper;
 import android.util.Log;
 import android.view.ViewGroup;
-import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.SslErrorHandler;
-import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -72,7 +70,7 @@ public class WebViewManager {
     }
 
     private void ClearCookieWebData() {
-        CookieManager cookieManager = CookieManager.getInstance();
+        android.webkit.CookieManager cookieManager = android.webkit.CookieManager.getInstance();
         cookieManager.removeAllCookies(null);
         cookieManager.flush();
         WebStorage.getInstance().deleteAllData();
@@ -101,9 +99,8 @@ public class WebViewManager {
     /**
      * Handles {@code grow://} deep-link URLs that arrive at the tail of the Google OAuth chain.
      *
-     * <p>This method is called from both the main WebView's {@link WebViewClientImpl} and from
-     * the phantom popup WebView's client, so that the token redirect is caught regardless of
-     * which window it lands in.
+     * <p>This method is called from the main WebView's {@link WebViewClientImpl} so that
+     * the token redirect is caught if it lands inside the WebView.
      *
      * @return {@code true} if the URL was a {@code grow://} link and has been consumed;
      *         {@code false} for all other URLs.
@@ -171,113 +168,20 @@ public class WebViewManager {
             settings.setJavaScriptEnabled(true);
             settings.setLoadsImagesAutomatically(true);
             settings.setDomStorageEnabled(true);
-            // Required for onCreateWindow to fire when the login page calls window.open().
-            settings.setSupportMultipleWindows(true);
-            settings.setJavaScriptCanOpenWindowsAutomatically(true);
+            // Note: setSupportMultipleWindows and setJavaScriptCanOpenWindowsAutomatically
+            // are intentionally NOT set. Real Growlauncher v5.57 has no WebChromeClient
+            // and the login page never calls window.open() — it calls nativeSignIn("").
 
             wv.setBackgroundColor(0);
             wv.setScrollBarStyle(android.view.View.SCROLLBARS_INSIDE_OVERLAY);
             wv.setLayoutParams(new RelativeLayout.LayoutParams(-1, -1));
             wv.addJavascriptInterface(new WebViewJavascriptInterface(this), "NativeApp");
 
-            // When the Growtopia login page calls window.open(googleOAuthUrl) for
-            // "Continue with Google", onCreateWindow fires here.
-            // We do NOT create a visible in-app popup — that would show the Google
-            // account chooser inside the app and block the screen with two Cancel buttons.
-            // Instead we redirect the URL to Chrome via startActivityForResult (same as
-            // NativeApp.openAsResult), so the user picks their Google account in Chrome.
-            // The grow:// redirect from Google comes back through onNewIntent →
-            // handleIntent() → ZennKuyBridge.sTokenDelivered → OnDeepLinkProcess().
-            wv.setWebChromeClient(new WebChromeClient() {
-                @Override
-                public boolean onCreateWindow(WebView view, boolean isDialog,
-                                              boolean isUserGesture,
-                                              android.os.Message resultMsg) {
-                    Log.d("WebViewManager", "onCreateWindow: window.open() intercepted → Chrome");
-                    AppLogger.log("WebViewManager", "onCreateWindow: redirecting Google OAuth popup to Chrome");
-
-                    // Phantom WebView: invisible transport target for window.open().
-                    // Added to the view group as GONE so it is attached to a window
-                    // (required on some API levels for WebViewClient callbacks to fire)
-                    // but never visible to the user.
-                    // As soon as the first real URL arrives we open Chrome and destroy it.
-                    final WebView phantom = new WebView(baseActivity);
-                    phantom.setVisibility(android.view.View.GONE);
-                    phantom.getSettings().setJavaScriptEnabled(true);
-                    ((SharedActivity) baseActivity).mViewGroup.addView(phantom);
-
-                    phantom.setWebViewClient(new WebViewClient() {
-                        private boolean handled = false;
-
-                        private boolean dispatch(String url) {
-                            if (url == null || url.equals("about:blank")) return false;
-
-                            // grow:// may arrive here on some devices before onNewIntent.
-                            if (handleGrowUrl(url)) {
-                                baseActivity.runOnUiThread(() -> closePopup(phantom));
-                                return true;
-                            }
-
-                            // Any real URL = the Google OAuth URL from window.open().
-                            // Redirect to Chrome, destroy phantom.
-                            if (!handled) {
-                                handled = true;
-                                final String target = url;
-                                baseActivity.runOnUiThread(() -> {
-                                    closePopup(phantom);
-                                    Log.d("WebViewManager", "onCreateWindow → Chrome: " + target);
-                                    AppLogger.log("WebViewManager", "Chrome launched for Google OAuth via window.open()");
-                                    baseActivity.startActivityForResult(
-                                        new Intent(Intent.ACTION_VIEW, Uri.parse(target)), 1);
-                                });
-                            }
-                            return true;
-                        }
-
-                        @Override
-                        public boolean shouldOverrideUrlLoading(WebView v,
-                                                                WebResourceRequest req) {
-                            return dispatch(req.getUrl().toString());
-                        }
-
-                        @Override
-                        @SuppressWarnings("deprecation")
-                        public boolean shouldOverrideUrlLoading(WebView v, String url) {
-                            return dispatch(url);
-                        }
-
-                        @Override
-                        public void onPageStarted(WebView v, String url,
-                                                  android.graphics.Bitmap favicon) {
-                            // Backup: some API levels skip shouldOverrideUrlLoading
-                            // for the very first window.open() navigation.
-                            dispatch(url);
-                        }
-                    });
-
-                    WebView.WebViewTransport transport =
-                            (WebView.WebViewTransport) resultMsg.obj;
-                    transport.setWebView(phantom);
-                    resultMsg.sendToTarget();
-                    return true;
-                }
-            });
-
             ((SharedActivity) this.baseActivity).mViewGroup.addView(wv);
         }
         this.webView.setBackgroundColor(0);
         this.webView.setLayoutParams(new RelativeLayout.LayoutParams(-1, -1));
         this.webView.setVisibility(android.view.View.VISIBLE);
-    }
-
-    /** Safely removes a popup or phantom WebView from the view hierarchy and destroys it. */
-    private void closePopup(WebView popup) {
-        if (popup == null) return;
-        ViewGroup parent = (ViewGroup) popup.getParent();
-        if (parent != null) parent.removeView(popup);
-        popup.stopLoading();
-        popup.destroy();
-        Log.d("WebViewManager", "closePopup: phantom/popup WebView destroyed");
     }
 
     public void LoadURL(final String url, final boolean allowExternal) {
@@ -430,13 +334,29 @@ public class WebViewManager {
         public void nativeSignIn(String token) {
             AppLogger.log("JSInterface", "nativeSignIn callback fired — token len=" + (token != null ? token.length() : "null"));
             Log.d("JSInterface", "nativeSignIn: token len=" + (token != null ? token.length() : 0));
-            if (token != null && !token.isEmpty()) {
-                // Mark token as delivered BEFORE calling nativeOnScriptCall.
-                // This ensures any concurrent SignIn() → startResolving() call that
-                // runs while nativeOnScriptCall is in flight will see the flag and
-                // bail out instead of loading the dashboard URL on top of us.
-                ZennKuyBridge.sTokenDelivered = true;
+
+            if (token == null || token.isEmpty()) {
+                // Login page calls nativeSignIn("") to trigger Google sign-in.
+                // Cannot use Android SDK (Error 10 on debug-signed APK).
+                // Open Chrome with the dashboard URL — Chrome loads the page WITHOUT
+                // the NativeApp JS interface, so the page uses its built-in browser
+                // OAuth flow (window.open / redirect). After Google auth, Growtopia
+                // server redirects to grow:// → Android → onNewIntent → handleIntent
+                // → ZennKuyBridge.sTokenDelivered = true → token delivery.
+                Log.d("JSInterface", "nativeSignIn: empty token — opening Chrome with dashboard URL");
+                AppLogger.log("JSInterface", "nativeSignIn: empty token — launching Chrome for Google OAuth");
+                WebViewManager.this.baseActivity.runOnUiThread(() -> {
+                    Intent intent = new Intent(Intent.ACTION_VIEW,
+                            Uri.parse(ZennKuyBridge.DASHBOARD_URL));
+                    WebViewManager.this.baseActivity.startActivityForResult(intent, 1);
+                });
+                return;
             }
+
+            // Non-empty token: ltoken delivered by grow:// redirect or page's own OAuth flow.
+            // Mark delivered BEFORE calling nativeOnScriptCall so any concurrent
+            // SignIn() → startResolving() sees the flag and bails out.
+            ZennKuyBridge.sTokenDelivered = true;
             android.widget.Toast.makeText(
                     Main.mainApp, "Logging in with google... wait a moment...",
                     android.widget.Toast.LENGTH_SHORT).show();
