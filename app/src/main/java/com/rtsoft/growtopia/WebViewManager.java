@@ -455,6 +455,28 @@ public class WebViewManager {
                     new Intent(Intent.ACTION_VIEW, Uri.parse(url)))
             );
         }
+
+        /**
+         * Called by Growtopia's login page JS: NativeApp.openAsResult(googleOAuthUrl)
+         *
+         * This is the PRIMARY path the login page uses to open the Google account chooser.
+         * It launches Chrome (or the default browser) with the Google OAuth URL via
+         * startActivityForResult so Android can route the grow:// redirect back to us
+         * through onActivityResult → Main.handleIntent → token delivery.
+         *
+         * Without this method the JS call is silently ignored, Chrome never opens,
+         * and the user never sees the "Choose an account" screen — the root cause of
+         * the "Continue with Google does nothing" bug.
+         */
+        @JavascriptInterface
+        public void openAsResult(final String url) {
+            Log.d("JSInterface", "openAsResult: launching Chrome for Google OAuth — url=" + url);
+            AppLogger.log("JSInterface", "openAsResult: starting Chrome with Google OAuth URL");
+            WebViewManager.this.baseActivity.runOnUiThread(() ->
+                WebViewManager.this.baseActivity.startActivityForResult(
+                    new Intent(Intent.ACTION_VIEW, Uri.parse(url)), 1)
+            );
+        }
     }
 
     private class WebViewClientImpl extends WebViewClient {
@@ -496,7 +518,7 @@ public class WebViewManager {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()");
             this.listener.OnPageLoaded(url);
         }
 
