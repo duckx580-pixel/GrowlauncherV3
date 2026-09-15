@@ -33,7 +33,7 @@ public class WebViewManager {
     boolean allowExternalLinks = true;
     private WebView webView = null;
 
-    // Fields used by the launcher's native message handler
+    // Fields used by the launcher’s native message handler
     public boolean needed_to_render = false;
     public String to_render = "";
     public String last_packet = "";
@@ -143,6 +143,9 @@ public class WebViewManager {
                 if (postData != null) {
                     this.last_packet = new String(postData, java.nio.charset.StandardCharsets.ISO_8859_1);
                 }
+
+                // Check ltoken spoof first — if a stored credential is available,
+                // skip the WebView entirely and inject it straight into the engine.
                 LoginSpoof spoof = getActiveSpoof();
                 if (spoof != null) {
                     String ltoken = spoof.getLtoken();
@@ -156,22 +159,34 @@ public class WebViewManager {
                         Log.d("WebViewManager", "ltoken empty, exchanging refresh token");
                         spoof.exchangeStoredRefreshToken(new LoginSpoof.ExchangeCallback() {
                             @Override public void onSuccess(String lt) {
-                                Log.d("WebViewManager", "refresh→ltoken OK, injecting");
+                                Log.d("WebViewManager", "refresh->ltoken OK, injecting");
                                 nativeOnScriptCall("nativeSignIn", lt);
                             }
                             @Override public void onFailure(String msg, String raw) {
-                                Log.w("WebViewManager", "refresh→ltoken failed: " + msg + " — falling back to WebView");
+                                Log.w("WebViewManager", "refresh->ltoken failed: " + msg + " — falling back to WebView");
                                 baseActivity.runOnUiThread(() -> showAndPostUrl(url, postData));
                             }
                         });
                         return;
                     }
+                    // Spoof enabled but no tokens — fall through to WebView.
                     Log.w("WebViewManager", "ltoken spoof enabled but no tokens stored; showing WebView");
                     showAndPostUrl(url, postData);
                     return;
                 }
-                AppLogger.log("WebViewManager", "LoadURLPost: no spoof — stored URL, waiting for SignIn() to load dashboard");
-                Log.d("WebViewManager", "LoadURLPost: no spoof active — storing URL, deferring WebView to SignIn()");
+
+                // No spoof — show the WebView with the Growtopia OAuth URL now.
+                // This matches real GrowLauncher v5.57 behaviour: the engine calls
+                // LoadURLPost first, then SignIn().  By showing the WebView here the
+                // user sees the Google account picker immediately instead of the game
+                // hanging on the loading screen.
+                //
+                // interceptUrl checks both "token" and "info" query params, so the
+                // grow:// token is captured regardless of which redirect path the
+                // Growtopia server uses for this device.
+                AppLogger.log("WebViewManager", "LoadURLPost: showing WebView with OAuth URL");
+                Log.d("WebViewManager", "LoadURLPost: showing WebView (v5.57 path)");
+                showAndPostUrl(url, postData);
             })
         );
     }
@@ -315,6 +330,19 @@ public class WebViewManager {
             return interceptUrl(url);
         }
 
+        /**
+         * Intercepts grow:// redirects so they never become Android Intents.
+         *
+         * The Growtopia server redirects the completed Google OAuth callback to
+         * grow://growtopia?token=...  or  grow://growtopia?info=...
+         * We consume it here, extract the ltoken, and call nativeOnScriptCall
+         * directly — without dispatching any Intent that the official Growtopia
+         * app could intercept.
+         *
+         * All other URLs (accounts.google.com, login.growtopiagame.com, etc.)
+         * return false so the WebView follows the full redirect chain natively,
+         * preserving the OAuth cookies and session state.
+         */
         private boolean interceptUrl(String url) {
             if (url == null) return false;
 
@@ -323,6 +351,8 @@ public class WebViewManager {
                 Log.d("WebView", "grow:// intercepted — full url=" + url);
                 try {
                     Uri uri = Uri.parse(url);
+                    // Try "token" first (standard OAuth redirect).
+                    // Fall back to "info" — Growtopia dashboard uses "info" instead.
                     String token = uri.getQueryParameter("token");
                     if (token == null || token.isEmpty()) {
                         token = uri.getQueryParameter("info");
@@ -335,7 +365,7 @@ public class WebViewManager {
                         final String safeToken = token;
                         baseActivity.runOnUiThread(() -> {
                             AppLogger.log("WebView", "grow:// delivering token to engine (len=" + safeToken.length() + ") — LOGIN SHOULD COMPLETE");
-                            Log.d("WebView", "grow:// delivering token to engine (len=" + safeToken.length() + ")");
+                            Log.d("WebView", "grow:// delivering token (len=" + safeToken.length() + ")");
                             android.widget.Toast.makeText(Main.mainApp,
                                     "Logging in with google... wait a moment...",
                                     android.widget.Toast.LENGTH_SHORT).show();
@@ -349,7 +379,7 @@ public class WebViewManager {
                 } catch (Exception e) {
                     Log.e("WebView", "grow:// intercept error: " + e);
                 }
-                return true;
+                return true; // Always consume grow:// — must not dispatch as Android Intent
             }
 
             return false;
