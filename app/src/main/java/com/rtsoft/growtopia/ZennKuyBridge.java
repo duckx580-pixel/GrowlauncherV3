@@ -24,6 +24,15 @@ public final class ZennKuyBridge {
      */
     public static volatile boolean sTokenDelivered = false;
 
+    /**
+     * Growtopia dashboard login URL.
+     *
+     * Public so WebViewManager.nativeSignIn("") can open it directly in Chrome
+     * when the login page triggers Google sign-in without an SDK token.
+     */
+    public static final String DASHBOARD_URL =
+        "https://login.growtopiagame.com/player/login/dashboard?valKey=40db4045f2d8c572efe8c4a060605726";
+
     private static LoginSpoof spoof() {
         if (Main.mainApp == null) return null;
         return new LoginSpoof(Main.mainApp);
@@ -159,17 +168,6 @@ public final class ZennKuyBridge {
             Log.e(TAG, "injectLtoken: " + e.getMessage());
         }
     }
-
-    /**
-     * Growtopia dashboard login URL.
-     *
-     * Loads in the in-app WebView as a fallback when LoadURLPost did not show
-     * the WebView (e.g. spoof path that consumed the call without opening it).
-     * The dashboard page calls NativeApp.nativeSignIn(token) from JS after the
-     * user authenticates with Google.
-     */
-    private static final String DASHBOARD_URL =
-        "https://login.growtopiagame.com/player/login/dashboard?valKey=40db4045f2d8c572efe8c4a060605726";
 
     private static void triggerWebViewLogin() {
         Main.mainApp.runOnUiThread(() -> {
