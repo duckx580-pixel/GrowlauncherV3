@@ -340,15 +340,23 @@ public class WebViewManager {
                 // Cannot use Android SDK (Error 10 on debug-signed APK).
                 // Open Chrome with the dashboard URL — Chrome loads the page WITHOUT
                 // the NativeApp JS interface, so the page uses its built-in browser
-                // OAuth flow (window.open / redirect). After Google auth, Growtopia
-                // server redirects to grow:// → Android → onNewIntent → handleIntent
-                // → ZennKuyBridge.sTokenDelivered = true → token delivery.
+                // OAuth flow. After Google auth, Growtopia server redirects to
+                // grow:// → Android → onNewIntent → handleIntent → nativeOnScriptCall.
+                //
+                // Using startActivity (NOT startActivityForResult) because Chrome
+                // opens as a separate task and immediately returns RESULT_CANCELED,
+                // which would hit onActivityResult → handleSignInResult → SDK failure
+                // path → second Cancel button in-game (the Cancel #2 bug).
                 Log.d("JSInterface", "nativeSignIn: empty token — opening Chrome with dashboard URL");
                 AppLogger.log("JSInterface", "nativeSignIn: empty token — launching Chrome for Google OAuth");
                 WebViewManager.this.baseActivity.runOnUiThread(() -> {
+                    // Hide WebView before Chrome opens so the game surface is
+                    // visible while the user completes Google sign-in in Chrome.
+                    WebViewManager.this.HideWebView();
                     Intent intent = new Intent(Intent.ACTION_VIEW,
                             Uri.parse(ZennKuyBridge.DASHBOARD_URL));
-                    WebViewManager.this.baseActivity.startActivityForResult(intent, 1);
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    WebViewManager.this.baseActivity.startActivity(intent);
                 });
                 return;
             }
@@ -394,19 +402,21 @@ public class WebViewManager {
         /**
          * Called by Growtopia's login page JS: NativeApp.openAsResult(googleOAuthUrl)
          *
-         * This is used when the login page detects the NativeApp JS interface and
-         * calls openAsResult() directly (instead of window.open()). It launches
-         * Chrome with the Google OAuth URL via startActivityForResult so Android can
-         * route the grow:// redirect back to us through onNewIntent → handleIntent().
+         * Launches Chrome with the Google OAuth URL. Uses startActivity
+         * (NOT startActivityForResult) — Chrome opens as a separate task and
+         * immediately returns RESULT_CANCELED, which would trigger onActivityResult
+         * → handleSignInResult → SDK failure path → second Cancel dialog (Cancel #2).
+         * The grow:// redirect routes back via onNewIntent → handleIntent instead.
          */
         @JavascriptInterface
         public void openAsResult(final String url) {
             Log.d("JSInterface", "openAsResult: launching Chrome for Google OAuth — url=" + url);
             AppLogger.log("JSInterface", "openAsResult: starting Chrome with Google OAuth URL");
-            WebViewManager.this.baseActivity.runOnUiThread(() ->
-                WebViewManager.this.baseActivity.startActivityForResult(
-                    new Intent(Intent.ACTION_VIEW, Uri.parse(url)), 1)
-            );
+            WebViewManager.this.baseActivity.runOnUiThread(() -> {
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                WebViewManager.this.baseActivity.startActivity(intent);
+            });
         }
     }
 
@@ -443,7 +453,7 @@ public class WebViewManager {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()");
             this.listener.OnPageLoaded(url);
         }
 

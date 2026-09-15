@@ -18,8 +18,6 @@ import android.view.inputmethod.InputMethodManager;
 import com.rtsoft.growtopia.HeightProvider;
 import com.ubisoft.bridge.JavaInterface;
 
-import java.net.URLEncoder;
-
 public class Main extends SharedActivity {
     public static boolean OriginalKeyboard = false;
     public static boolean block_pause;
@@ -110,12 +108,8 @@ public class Main extends SharedActivity {
             if (info != null || token != null) {
                 // Google OAuth redirect: grow://growtopia?info=...&token=...
                 // Chrome followed the grow:// redirect after Google authentication.
-                // Deliver the full payload to the game engine — equivalent to
-                // Real Growlauncher's JNICall.notifyValueChanged(5, "google_redirect_callback", payload).
                 final String safeInfo  = info  != null ? info  : "";
                 final String safeToken = token != null ? token : "";
-                final String payload = "info=" + URLEncoder.encode(safeInfo)
-                        + "&token=" + URLEncoder.encode(safeToken);
                 Log.d("Main", "Google OAuth redirect received, token length=" + safeToken.length()
                         + " info length=" + safeInfo.length());
 
@@ -134,9 +128,18 @@ public class Main extends SharedActivity {
                 // on top of the game after token delivery.
                 webViewManager.HideWebView();
 
-                // Single delivery path: OnDeepLinkProcess receives the full info+token payload.
-                if (mGLView != null) {
-                    mGLView.post(() -> NativeAppInterface.OnDeepLinkProcess(payload));
+                // Deliver ltoken to the engine via nativeOnScriptCall("nativeSignIn", token).
+                // This is the V3 equivalent of Real Growlauncher's:
+                //   JNICall.notifyValueChanged(5, "google_redirect_callback", payload)
+                // "token" param first, "info" as fallback — Growtopia sometimes delivers
+                // the ltoken in the "info" param instead of "token".
+                // This is the same delivery path used by handleGrowUrl() when the grow://
+                // redirect is intercepted inside the WebView.
+                final String actualToken = !safeToken.isEmpty() ? safeToken : safeInfo;
+                if (!actualToken.isEmpty()) {
+                    webViewManager.nativeOnScriptCall("nativeSignIn", actualToken);
+                } else {
+                    Log.w("Main", "handleIntent: grow:// redirect had no usable token — login may fail");
                 }
             } else {
                 HandleDeeplink(intent);
@@ -194,13 +197,21 @@ public class Main extends SharedActivity {
 
     /**
      * Dispatches the Google Sign-In SDK result to GoogleSignInHelper.
-     * RC 9001 is a no-op stub since GoogleSignInHelper.SignIn() no longer
-     * launches the SDK account picker. Kept for safety.
+     *
+     * Request code 1 is reserved for Chrome/browser OAuth launches
+     * (nativeSignIn("") and openAsResult()). Chrome opens as a separate
+     * task and immediately returns RESULT_CANCELED — forwarding that to the
+     * SDK would trigger a failed-sign-in callback and show a second Cancel
+     * button in-game (the Cancel #2 bug). RC 1 is therefore excluded.
      */
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (googleSignInHelper != null) {
+        // Do NOT forward RC 1 to the SDK — that is the Chrome browser launch
+        // request code. Chrome returns RESULT_CANCELED immediately (it opens
+        // as a separate task), which the SDK misinterprets as a failed sign-in
+        // and triggers a second Cancel dialog in-game.
+        if (requestCode != 1 && googleSignInHelper != null) {
             googleSignInHelper.handleSignInResult(requestCode, resultCode, data);
         }
     }
