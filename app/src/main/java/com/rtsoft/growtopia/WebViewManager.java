@@ -102,11 +102,11 @@ public class WebViewManager {
      * Handles {@code grow://} deep-link URLs that arrive at the tail of the Google OAuth chain.
      *
      * <p>This method is called from both the main WebView's {@link WebViewClientImpl} and from
-     * the Google account-chooser popup WebView's client, so that the token redirect is caught
-     * regardless of which window it lands in.
+     * the phantom popup WebView's client, so that the token redirect is caught regardless of
+     * which window it lands in.
      *
      * @return {@code true} if the URL was a {@code grow://} link and has been consumed;
-     *         {@code false} for all other URLs (let the WebView follow them natively).
+     *         {@code false} for all other URLs.
      */
     boolean handleGrowUrl(String url) {
         if (url == null || !url.startsWith("grow://")) return false;
@@ -171,10 +171,7 @@ public class WebViewManager {
             settings.setJavaScriptEnabled(true);
             settings.setLoadsImagesAutomatically(true);
             settings.setDomStorageEnabled(true);
-            // Required for Google OAuth account-chooser popup:
-            // The Growtopia login page calls window.open() to launch the Google account
-            // chooser. Without these two flags the popup is silently blocked and the
-            // user never sees the "Choose an account" screen.
+            // Required for onCreateWindow to fire when the login page calls window.open().
             settings.setSupportMultipleWindows(true);
             settings.setJavaScriptCanOpenWindowsAutomatically(true);
 
@@ -183,66 +180,84 @@ public class WebViewManager {
             wv.setLayoutParams(new RelativeLayout.LayoutParams(-1, -1));
             wv.addJavascriptInterface(new WebViewJavascriptInterface(this), "NativeApp");
 
-            // WebChromeClient handles window.open() popup requests.
-            // When the user taps "Continue with Google" on the Growtopia login page,
-            // the page opens the Google account chooser in a popup window. We create
-            // a full-screen child WebView for it so it renders on top of the main view.
-            // If the OAuth callback (grow://) lands inside the popup we intercept it
-            // via handleGrowUrl() — same handler used by the main WebView.
+            // When the Growtopia login page calls window.open(googleOAuthUrl) for
+            // "Continue with Google", onCreateWindow fires here.
+            // We do NOT create a visible in-app popup — that would show the Google
+            // account chooser inside the app and block the screen with two Cancel buttons.
+            // Instead we redirect the URL to Chrome via startActivityForResult (same as
+            // NativeApp.openAsResult), so the user picks their Google account in Chrome.
+            // The grow:// redirect from Google comes back through onNewIntent →
+            // handleIntent() → ZennKuyBridge.sTokenDelivered → OnDeepLinkProcess().
             wv.setWebChromeClient(new WebChromeClient() {
                 @Override
                 public boolean onCreateWindow(WebView view, boolean isDialog,
                                               boolean isUserGesture,
                                               android.os.Message resultMsg) {
-                    Log.d("WebViewManager", "onCreateWindow: Google OAuth popup requested");
-                    AppLogger.log("WebViewManager", "onCreateWindow: creating Google account-chooser popup WebView");
+                    Log.d("WebViewManager", "onCreateWindow: window.open() intercepted → Chrome");
+                    AppLogger.log("WebViewManager", "onCreateWindow: redirecting Google OAuth popup to Chrome");
 
-                    final WebView popup = new WebView(baseActivity);
-                    popup.setLayoutParams(new RelativeLayout.LayoutParams(-1, -1));
+                    // Phantom WebView: invisible transport target for window.open().
+                    // Added to the view group as GONE so it is attached to a window
+                    // (required on some API levels for WebViewClient callbacks to fire)
+                    // but never visible to the user.
+                    // As soon as the first real URL arrives we open Chrome and destroy it.
+                    final WebView phantom = new WebView(baseActivity);
+                    phantom.setVisibility(android.view.View.GONE);
+                    phantom.getSettings().setJavaScriptEnabled(true);
+                    ((SharedActivity) baseActivity).mViewGroup.addView(phantom);
 
-                    WebSettings popupSettings = popup.getSettings();
-                    popupSettings.setJavaScriptEnabled(true);
-                    popupSettings.setDomStorageEnabled(true);
+                    phantom.setWebViewClient(new WebViewClient() {
+                        private boolean handled = false;
 
-                    // Intercept grow:// inside the popup too — Google may redirect
-                    // back through the popup window instead of the parent.
-                    popup.setWebViewClient(new WebViewClient() {
+                        private boolean dispatch(String url) {
+                            if (url == null || url.equals("about:blank")) return false;
+
+                            // grow:// may arrive here on some devices before onNewIntent.
+                            if (handleGrowUrl(url)) {
+                                baseActivity.runOnUiThread(() -> closePopup(phantom));
+                                return true;
+                            }
+
+                            // Any real URL = the Google OAuth URL from window.open().
+                            // Redirect to Chrome, destroy phantom.
+                            if (!handled) {
+                                handled = true;
+                                final String target = url;
+                                baseActivity.runOnUiThread(() -> {
+                                    closePopup(phantom);
+                                    Log.d("WebViewManager", "onCreateWindow → Chrome: " + target);
+                                    AppLogger.log("WebViewManager", "Chrome launched for Google OAuth via window.open()");
+                                    baseActivity.startActivityForResult(
+                                        new Intent(Intent.ACTION_VIEW, Uri.parse(target)), 1);
+                                });
+                            }
+                            return true;
+                        }
+
                         @Override
                         public boolean shouldOverrideUrlLoading(WebView v,
                                                                 WebResourceRequest req) {
-                            String url = req.getUrl().toString();
-                            if (handleGrowUrl(url)) {
-                                // Token delivered — close popup immediately
-                                baseActivity.runOnUiThread(() -> closePopup(popup));
-                                return true;
-                            }
-                            return false; // let popup WebView follow navigation natively
+                            return dispatch(req.getUrl().toString());
                         }
 
                         @Override
                         @SuppressWarnings("deprecation")
                         public boolean shouldOverrideUrlLoading(WebView v, String url) {
-                            if (handleGrowUrl(url)) {
-                                baseActivity.runOnUiThread(() -> closePopup(popup));
-                                return true;
-                            }
-                            return false;
+                            return dispatch(url);
                         }
-                    });
 
-                    popup.setWebChromeClient(new WebChromeClient() {
                         @Override
-                        public void onCloseWindow(WebView w) {
-                            Log.d("WebViewManager", "onCloseWindow: Google popup closing");
-                            baseActivity.runOnUiThread(() -> closePopup(w));
+                        public void onPageStarted(WebView v, String url,
+                                                  android.graphics.Bitmap favicon) {
+                            // Backup: some API levels skip shouldOverrideUrlLoading
+                            // for the very first window.open() navigation.
+                            dispatch(url);
                         }
                     });
-
-                    ((SharedActivity) baseActivity).mViewGroup.addView(popup);
 
                     WebView.WebViewTransport transport =
                             (WebView.WebViewTransport) resultMsg.obj;
-                    transport.setWebView(popup);
+                    transport.setWebView(phantom);
                     resultMsg.sendToTarget();
                     return true;
                 }
@@ -255,14 +270,14 @@ public class WebViewManager {
         this.webView.setVisibility(android.view.View.VISIBLE);
     }
 
-    /** Safely removes a popup WebView from the view hierarchy and destroys it. */
+    /** Safely removes a popup or phantom WebView from the view hierarchy and destroys it. */
     private void closePopup(WebView popup) {
         if (popup == null) return;
         ViewGroup parent = (ViewGroup) popup.getParent();
         if (parent != null) parent.removeView(popup);
         popup.stopLoading();
         popup.destroy();
-        Log.d("WebViewManager", "closePopup: Google OAuth popup destroyed");
+        Log.d("WebViewManager", "closePopup: phantom/popup WebView destroyed");
     }
 
     public void LoadURL(final String url, final boolean allowExternal) {
@@ -459,14 +474,10 @@ public class WebViewManager {
         /**
          * Called by Growtopia's login page JS: NativeApp.openAsResult(googleOAuthUrl)
          *
-         * This is the PRIMARY path the login page uses to open the Google account chooser.
-         * It launches Chrome (or the default browser) with the Google OAuth URL via
-         * startActivityForResult so Android can route the grow:// redirect back to us
-         * through onActivityResult → Main.handleIntent → token delivery.
-         *
-         * Without this method the JS call is silently ignored, Chrome never opens,
-         * and the user never sees the "Choose an account" screen — the root cause of
-         * the "Continue with Google does nothing" bug.
+         * This is used when the login page detects the NativeApp JS interface and
+         * calls openAsResult() directly (instead of window.open()). It launches
+         * Chrome with the Google OAuth URL via startActivityForResult so Android can
+         * route the grow:// redirect back to us through onNewIntent → handleIntent().
          */
         @JavascriptInterface
         public void openAsResult(final String url) {
@@ -503,22 +514,16 @@ public class WebViewManager {
          * Delegates {@code grow://} URLs to {@link WebViewManager#handleGrowUrl(String)}.
          *
          * <p>All other URLs return {@code false} so the WebView follows the full redirect
-         * chain natively, preserving OAuth cookies and session state.  Calling
-         * {@code view.loadUrl()} on each hop would break the Google OAuth chain because
-         * every redirect carries session state in cookies and headers that loadUrl()
-         * silently discards by starting a fresh GET.
+         * chain natively, preserving OAuth cookies and session state.
          */
         private boolean interceptUrl(String url) {
             if (url == null) return false;
-            // grow:// is the Growtopia custom scheme — extract and deliver the token.
-            // All other URLs (accounts.google.com, login.growtopiagame.com, …) return
-            // false so the WebView follows them natively.
             return WebViewManager.this.handleGrowUrl(url);
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()");
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
             this.listener.OnPageLoaded(url);
         }
 
