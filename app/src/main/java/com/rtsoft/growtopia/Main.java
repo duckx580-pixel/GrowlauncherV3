@@ -84,8 +84,6 @@ public class Main extends SharedActivity {
         return super.dispatchTouchEvent(ev);
     }
 
-    // Input is handled by AppGLSurfaceView and SharedActivity's JNI bridge.
-
     private void applyImmersiveFullscreen() {
         if (Build.VERSION.SDK_INT >= 30) {
             WindowInsetsController controller = getWindow().getInsetsController();
@@ -122,16 +120,11 @@ public class Main extends SharedActivity {
 
                 // Mark token as delivered so ZennKuyBridge.startResolving() does not
                 // reload the dashboard URL if the engine retries SignIn() after this.
-                // Without this flag, the retry loads the dashboard → second nativeSignIn
-                // fires → engine sees a duplicate token → "please try login again".
                 if (!safeToken.isEmpty()) {
                     ZennKuyBridge.sTokenDelivered = true;
                 }
 
-                // Single delivery path: OnDeepLinkProcess receives the full info+token
-                // payload in the same format the Growtopia server sends.
-                // Do NOT also call googleSignInHelper.deliverResult() — that would deliver
-                // the token a second time in a different format and confuse the engine.
+                // Single delivery path: OnDeepLinkProcess receives the full info+token payload.
                 if (mGLView != null) {
                     mGLView.post(() -> NativeAppInterface.OnDeepLinkProcess(payload));
                 }
@@ -189,12 +182,22 @@ public class Main extends SharedActivity {
         }
     }
 
-    // Matches Real Growlauncher: only super.onActivityResult, no SDK dispatch.
-    // googleSignInHelper.handleSignInResult() was a no-op (SDK not used) so
-    // removing it has no functional effect — just eliminates dead code.
+    /**
+     * Dispatches the Google Sign-In SDK result to GoogleSignInHelper.
+     *
+     * Real Growlauncher calls super only and drops the SDK result entirely.
+     * V3 improves on this by dispatching to handleSignInResult (requestCode 9001)
+     * so the Google ID token is actually extracted and delivered to the engine.
+     *
+     * Request code 1 (openAsResult Chrome browser OAuth) is handled separately
+     * through onNewIntent → handleIntent — not here.
+     */
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (googleSignInHelper != null) {
+            googleSignInHelper.handleSignInResult(requestCode, resultCode, data);
+        }
     }
 
     @Override
@@ -219,17 +222,10 @@ public class Main extends SharedActivity {
         SharedActivity.securityEnabled = false;
         SharedActivity.IAPEnabled = true;
         SharedActivity.HookedEnabled = false;
-        // Deliberately NOT getPackageName(): the real Growlauncher sets this to the
-        // Growtopia application id, and it decides which APK the engine mounts for
-        // its GameData. Overwriting it with the launcher id made the engine look in
-        // the wrong package, and made sendVersionDetails() report the launcher
-        // version to the server instead of the game version.
         SharedActivity.PackageName = SharedActivity.GROWTOPIA_PACKAGE;
         com.gentz.launcher.CrashLogger.markLaunchStarted();
         NativeLibraries.loadGame();
 
-        // The engine can ask for the consent manager from its first frame, so it has to
-        // exist before the GL surface is created in SharedActivity.onCreate().
         this.usercentricsManager = new UsercentricsManager(this);
 
         super.onCreate(savedInstanceState);
@@ -246,11 +242,8 @@ public class Main extends SharedActivity {
             getResources().updateConfiguration(config, getResources().getDisplayMetrics());
         }
 
-        JavaInterface.injectActivityJava(this); // Ubisoft bridge init
+        JavaInterface.injectActivityJava(this);
 
-        // mViewGroup exists once super.onCreate() (SharedActivity) has run;
-        // attach the ZK overlay button to it directly instead of the ImGui
-        // native-render path, which never receives a frame (see GOT hook notes).
         this.zennKuyOverlay = new ZennKuyOverlay(this);
         this.zennKuyOverlay.attachTo(mViewGroup);
 
@@ -261,11 +254,9 @@ public class Main extends SharedActivity {
         this.firebaseCrashlyticsManager = new FirebaseCrashlyticsManager(this);
         this.ironSourceManager.OnCreate();
         this.appReviewManager.OnCreate();
-        getWindow().addFlags(128); // FLAG_KEEP_SCREEN_ON
+        getWindow().addFlags(128);
 
-        // Handle grow:// redirect if the activity was cold-started by the OAuth callback.
         handleIntent(getIntent());
-
     }
 
     @Override
@@ -293,8 +284,6 @@ public class Main extends SharedActivity {
 
     @Override
     public void onStop() {
-        // Clears the launch breadcrumb; without it the launcher reports a phantom
-        // native crash on every subsequent start.
         com.gentz.launcher.CrashLogger.markLaunchFinished();
         super.onStop();
     }

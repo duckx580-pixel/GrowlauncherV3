@@ -7,105 +7,150 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import com.google.android.gms.auth.api.signin.GoogleSignIn;
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
+import com.google.android.gms.auth.api.signin.GoogleSignInClient;
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.common.api.ApiException;
+import com.google.android.gms.tasks.Task;
+
 /**
- * Google Sign-In — dashboard API WebView flow, fully contained inside the process.
+ * Google Sign-In — Android SDK path (same as Real Growlauncher v5.57 and Genta Hax).
  *
- * <p><b>Why not the Android Google Sign-In SDK?</b><br>
- * The Android SDK ({@code GoogleSignIn.getClient(...).getSignInIntent()}) always fails with
- * {@code DEVELOPER_ERROR} (status code 10) on debug-signed APKs because the SHA-1 fingerprint
- * is not registered in the Google Cloud project.
+ * <p><b>Why no Error 10?</b><br>
+ * Error 10 ({@code DEVELOPER_ERROR}) only fires when using an <em>Android-type</em>
+ * OAuth client that has a SHA-1 fingerprint registered. The client ID
+ * {@code 389994132396-4s6ol46f60831v5blfpci7lnmsdnh8br} is Growtopia’s
+ * <em>web-type</em> OAuth client — it has no SHA-1 requirement. Real Growlauncher
+ * uses it with package name {@code com.gentz.launcher} (not {@code com.rtsoft.growtopia})
+ * and it works, which confirms no fingerprint check. Any signing key works.
  *
- * <p><b>Why not the standard OAuth URL (LoadURLPost)?</b><br>
- * The standard OAuth flow ends with a {@code grow://growtopia?token=...} redirect.
- * If the official Growtopia app is installed and also handles the {@code grow://} scheme,
- * Android routes the token to it instead of V3 — silently swallowing the login and causing
- * the "loops back to Google" symptom. Even inside a WebView, the redirect can fail silently
- * on some devices.
+ * <p><b>Flow:</b><br>
+ * {@link #SignIn()} → Android SDK account picker → user picks account →
+ * {@link Main#onActivityResult} → {@link #handleSignInResult} extracts Google
+ * ID token → {@link #OnSignIn(int, String)} delivers to engine via GL thread.
  *
- * <p><b>Actual flow (dashboard API, same as Genta Hax v5.53 "Start Resolving"):</b><br>
- * {@link ZennKuyBridge#startResolving()} loads the Growtopia dashboard URL
- * ({@code https://login.growtopiagame.com/player/login/dashboard?valKey=...}) in the in-app
- * WebView. After the user authenticates with Google, the dashboard page calls
- * {@code NativeApp.nativeSignIn(ltoken)} from its own JavaScript.
- * {@link WebViewManager.WebViewJavascriptInterface#nativeSignIn} picks this up and delivers
- * the token to the engine via {@code nativeOnScriptCall("nativeSignIn", token)} — no
- * {@code grow://} redirect involved at all.
+ * <p>The secondary path ({@link ZennKuyBridge#startResolving()}) is kept as a
+ * fallback if the SDK throws unexpectedly. The primary WebView path
+ * ({@code LoadURLPost} → {@code openAsResult} → Chrome → {@code grow://} redirect
+ * → {@link Main#handleIntent}) also continues to work independently.
  */
 public class GoogleSignInHelper {
     private static final String TAG = "GoogleSignInHelper";
 
+    /**
+     * Growtopia’s web-type OAuth client ID.
+     * Web clients do not require SHA-1 fingerprint registration — no Error 10.
+     * Same client ID used by Real Growlauncher v5.57 and Genta Hax.
+     */
     static final String CLIENT_ID =
         "389994132396-4s6ol46f60831v5blfpci7lnmsdnh8br.apps.googleusercontent.com";
 
-    // Kept for onActivityResult dispatch wiring in Main (harmless if never triggered).
+    /** Request code passed to startActivityForResult for the SDK account picker. */
     static final int RC_GOOGLE_SIGNIN = 9001;
 
     Activity mainActivity;
-
-    // Records the captured token/status for the Login Spoof menu.
     private final LoginSpoof spoof;
+    private GoogleSignInClient googleSignInClient;
 
     public GoogleSignInHelper(Activity activity) {
         this.mainActivity = activity;
         this.spoof = new LoginSpoof(activity);
     }
 
+    /** Native method in libzennkuy.so — delivers sign-in result to the game engine. */
     public native void OnSignIn(int code, String token);
     public void Init() {}
     public void SignOut() {}
 
     // ── Entry point called by the native engine ──────────────────────────────────────────────
     /**
-     * Delegates immediately to {@link ZennKuyBridge#startResolving()} which handles
-     * ltoken spoof injection or dashboard-API Google OAuth as appropriate.
+     * Starts the Google Sign-In SDK flow — same approach as Real Growlauncher v5.57.
      *
-     * <p>The previous "WebView already visible, do nothing" path was insufficient: the
-     * engine's {@link WebViewManager#LoadURLPost} opens the WebView with the standard
-     * Growtopia OAuth URL, which terminates with a {@code grow://} redirect that either
-     * goes to the official app or fails silently. We now always redirect to the dashboard
-     * URL instead.
+     * <p>Builds a {@link GoogleSignInOptions} with {@code requestIdToken} using
+     * Growtopia’s web client ID, then launches the native Google account picker
+     * via {@code startActivityForResult}. The result arrives at
+     * {@link Main#onActivityResult} and is dispatched to
+     * {@link #handleSignInResult(int, int, Intent)}.
+     *
+     * <p>If the SDK throws (device has no Google Play Services, or another
+     * unexpected error), falls back to {@link ZennKuyBridge#startResolving()}
+     * which loads the dashboard URL in the in-app WebView.
      */
     public void SignIn() {
         if (Main.mainApp == null) {
             Log.e(TAG, "SignIn: mainApp is null");
             return;
         }
-
         mainActivity.runOnUiThread(() -> {
-            // Always delegate to ZennKuyBridge.
-            //
-            // The normal path (engine calls LoadURLPost before SignIn) opened the WebView with
-            // the standard Growtopia OAuth URL, which ends with a grow:// redirect.  That
-            // redirect either gets intercepted by the official Growtopia app (if installed) or
-            // fails silently — both cause the "loops back to Google" symptom.
-            //
-            // ZennKuyBridge.startResolving() checks ltoken spoof first (instant login), then
-            // falls through to triggerWebViewLogin() which loads the Growtopia DASHBOARD URL
-            // instead.  The dashboard page calls NativeApp.nativeSignIn(token) from its own
-            // JavaScript after Google auth completes — no grow:// redirect needed at all.
-            // This is the same mechanism Genta Hax v5.53 "Start Resolving" uses.
-            Log.d(TAG, "SignIn: delegating to ZennKuyBridge (dashboard API path)");
-            spoof.setGoogleLogs("Triggering dashboard API Google OAuth via ZennKuyBridge");
-            ZennKuyBridge.startResolving();
+            try {
+                GoogleSignInOptions options = new GoogleSignInOptions
+                        .Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                        .requestIdToken(CLIENT_ID)
+                        .requestEmail()
+                        .build();
+                googleSignInClient = GoogleSignIn.getClient(mainActivity, options);
+                Intent signInIntent = googleSignInClient.getSignInIntent();
+                Log.d(TAG, "SignIn: launching Google account picker via SDK");
+                spoof.setGoogleLogs("SDK sign-in started — account picker shown");
+                mainActivity.startActivityForResult(signInIntent, RC_GOOGLE_SIGNIN);
+            } catch (Exception e) {
+                Log.e(TAG, "SignIn: SDK error: " + e.getMessage());
+                spoof.setGoogleLogs("SDK failed (" + e.getMessage() + "), fallback to dashboard");
+                // Fallback: load the Growtopia dashboard URL in the in-app WebView.
+                // The dashboard page calls NativeApp.nativeSignIn(token) from JS
+                // after Google auth, same mechanism as Genta Hax “Start Resolving”.
+                ZennKuyBridge.startResolving();
+            }
         });
     }
 
-    // ── onActivityResult dispatcher (called from Main.onActivityResult) ────
-    // The Android SDK is no longer used, so this will never be triggered in
-    // normal operation. Kept so Main.onActivityResult wiring compiles.
+    // ── onActivityResult dispatcher (called from Main.onActivityResult) ───────────────────
+    /**
+     * Processes the Google Sign-In SDK result.
+     *
+     * <p>Real Growlauncher calls {@code super.onActivityResult()} and never
+     * dispatches to this method — the SDK result is silently dropped on their side.
+     * V3 improves on this by actually extracting the Google ID token and delivering
+     * it to the engine via {@link #OnSignIn(int, String)}.
+     *
+     * <p>Only handles {@link #RC_GOOGLE_SIGNIN} (9001). Request code 1 is used by
+     * {@code openAsResult} (Chrome browser OAuth) and is handled separately via
+     * {@code onNewIntent} → {@code handleIntent}.
+     */
     public void handleSignInResult(int requestCode, int resultCode, Intent data) {
-        // No-op: we no longer use startActivityForResult / Android SDK.
-        Log.d(TAG, "handleSignInResult called (SDK no longer used) — ignoring");
+        if (requestCode != RC_GOOGLE_SIGNIN) return;
+        try {
+            Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
+            GoogleSignInAccount account = task.getResult(ApiException.class);
+            String idToken = account.getIdToken();
+            Log.d(TAG, "handleSignInResult: success — idToken len=" + (idToken != null ? idToken.length() : 0));
+            if (idToken != null && !idToken.isEmpty()) {
+                spoof.setGoogleToken(idToken);
+                spoof.setGoogleLogs("SDK sign-in OK (idToken len=" + idToken.length() + ")");
+                deliverResult(0, idToken);
+            } else {
+                Log.w(TAG, "handleSignInResult: idToken is null or empty");
+                spoof.setGoogleLogs("SDK sign-in: idToken was null");
+                deliverResult(-1, "");
+            }
+        } catch (ApiException e) {
+            Log.w(TAG, "handleSignInResult: sign-in failed, status=" + e.getStatusCode());
+            spoof.setGoogleLogs("SDK sign-in failed (status=" + e.getStatusCode() + ")");
+            // status 10 = DEVELOPER_ERROR; status 12501 = user cancelled
+            deliverResult(e.getStatusCode(), "");
+        } catch (Exception e) {
+            Log.e(TAG, "handleSignInResult: unexpected error: " + e.getMessage());
+            deliverResult(-1, "");
+        }
     }
 
-    // ── Token delivery on the GL thread ──────────────────────────────────────────────
-    // Used only if some external path calls OnSignIn directly (e.g. ltoken spoof).
+    // ── Token delivery on the GL thread ──────────────────────────────────────────────────────
     private static final int MAX_DELIVER_RETRIES = 40; // ~4s at 100ms
     private final Handler deliverHandler = new Handler(Looper.getMainLooper());
 
     public void deliverResult(int code, String token) {
         if (code == 0 && token != null && !token.isEmpty()) {
-            spoof.setGoogleToken(token);
             spoof.setGoogleLogs("Google sign-in OK (token length=" + token.length() + ")");
         } else {
             spoof.setGoogleLogs("Google sign-in failed (code=" + code + ")");
