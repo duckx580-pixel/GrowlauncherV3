@@ -66,11 +66,22 @@ public class GoogleSignInHelper {
             return;
         }
 
-        // Grab the OAuth URL the engine already stored.
+        // Grab the OAuth URL the engine already stored — but ONLY if it is actually
+        // the Google OAuth URL. LoadURLPost is called for many game HTTP requests,
+        // so last_url may contain a Growtopia game URL (e.g. wtopiagame.com) at the
+        // moment SignIn() fires. We filter to only accept Google/OAuth URLs.
         String oauthUrl = null;
         WebViewManager wvm = Main.mainApp.webViewManager;
         if (wvm != null && wvm.last_url != null && !wvm.last_url.isEmpty()) {
-            oauthUrl = wvm.last_url;
+            String candidate = wvm.last_url;
+            if (isGoogleOAuthUrl(candidate)) {
+                oauthUrl = candidate;
+                Log.d(TAG, "SignIn: valid Google OAuth URL captured from last_url");
+            } else {
+                Log.w(TAG, "SignIn: last_url is NOT a Google OAuth URL (got: "
+                        + candidate.substring(0, Math.min(80, candidate.length()))
+                        + ") — will use WebView fallback");
+            }
         }
 
         final String urlToOpen = oauthUrl;
@@ -90,12 +101,28 @@ public class GoogleSignInHelper {
                     ZennKuyBridge.startResolving();
                 }
             } else {
-                // ── Fallback: last_url not yet set — use in-app WebView login ──
-                Log.d(TAG, "SignIn: last_url not available — falling back to WebView login");
-                spoof.setGoogleLogs("last_url not set, using WebView login");
+                // ── Fallback: last_url not a Google OAuth URL or not yet set ──
+                Log.d(TAG, "SignIn: no valid OAuth URL — falling back to WebView login");
+                spoof.setGoogleLogs("No Google OAuth URL in last_url — using WebView login");
                 ZennKuyBridge.startResolving();
             }
         });
+    }
+
+    // ── URL validator: only accept actual Google OAuth URLs ───────────────────
+    /**
+     * Returns true if {@code url} is the Google OAuth page the game engine builds.
+     *
+     * <p>The game calls {@code LoadURLPost} for many purposes (server data, items.dat, etc.).
+     * We must not open those in Chrome — only the OAuth URL destined for Google's sign-in.
+     * The URL will contain "accounts.google.com" or carry the Ubisoft client ID.
+     */
+    private static boolean isGoogleOAuthUrl(String url) {
+        if (url == null || url.isEmpty()) return false;
+        return url.contains("accounts.google.com")
+                || url.contains("389994132396")       // Ubisoft client_id
+                || url.contains("oauth2")
+                || url.contains("openid");
     }
 
     // ── onActivityResult dispatcher (called from Main.onActivityResult) ────
