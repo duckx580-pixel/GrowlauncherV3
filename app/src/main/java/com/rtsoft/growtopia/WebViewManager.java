@@ -174,8 +174,19 @@ public class WebViewManager {
                     }
                     // Spoof enabled but no tokens at all — fall through to normal WebView.
                     Log.w("WebViewManager", "ltoken spoof enabled but no tokens stored; showing WebView");
+                    showAndPostUrl(url, postData);
+                    return;
                 }
-                showAndPostUrl(url, postData);
+                // No spoof active — do NOT show the WebView here.
+                // libgrowtopia.so always calls LoadURLPost *before* SignIn().
+                // SignIn() will delegate to ZennKuyBridge.startResolving() which loads
+                // the Growtopia dashboard URL directly via LoadURL(). Showing the OAuth
+                // URL here would race against that: if Google auto-redirects (cached session)
+                // before the dashboard URL loads, interceptUrl fires with a grow:// URL whose
+                // ltoken lives in the "info" param (not "token"), we miss it, and the engine
+                // times out → "Please try login again."  Storing last_url/last_packet is enough
+                // for ZennKuyBridge to have the fallback URL if needed.
+                Log.d("WebViewManager", "LoadURLPost: no spoof active — storing URL, deferring WebView to SignIn()");
             })
         );
     }
@@ -345,15 +356,23 @@ public class WebViewManager {
             if (url.startsWith("grow://")) {
                 // grow:// is the Growtopia custom scheme — the game's own deep-link format.
                 // Consume it here so it never becomes an Android Intent.
+                Log.d("WebView", "grow:// intercepted — full url=" + url);
                 try {
                     Uri uri = Uri.parse(url);
+                    // Try "token" first (standard grow:// OAuth redirect).
+                    // Fall back to "info" — the Growtopia dashboard page uses "info" instead
+                    // of "token" as the ltoken parameter in its grow:// redirect.
                     String token = uri.getQueryParameter("token");
-                    String info  = uri.getQueryParameter("info");
+                    if (token == null || token.isEmpty()) {
+                        token = uri.getQueryParameter("info");
+                        if (token != null && !token.isEmpty()) {
+                            Log.d("WebView", "grow:// — token was in 'info' param (len=" + token.length() + ")");
+                        }
+                    }
                     if (token != null && !token.isEmpty()) {
                         final String safeToken = token;
                         baseActivity.runOnUiThread(() -> {
-                            Log.d("WebView", "grow:// intercepted — delivering token to engine (len="
-                                    + safeToken.length() + ")");
+                            Log.d("WebView", "grow:// delivering token to engine (len=" + safeToken.length() + ")");
                             android.widget.Toast.makeText(Main.mainApp,
                                     "Logging in with google... wait a moment...",
                                     android.widget.Toast.LENGTH_SHORT).show();
@@ -361,7 +380,7 @@ public class WebViewManager {
                             WebViewManager.this.nativeOnScriptCall("nativeSignIn", safeToken);
                         });
                     } else {
-                        Log.w("WebView", "grow:// redirect had no token — url=" + url);
+                        Log.w("WebView", "grow:// redirect had no token or info param — url=" + url);
                     }
                 } catch (Exception e) {
                     Log.e("WebView", "grow:// intercept error: " + e);
@@ -378,7 +397,7 @@ public class WebViewManager {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()");
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
             this.listener.OnPageLoaded(url);
         }
 
