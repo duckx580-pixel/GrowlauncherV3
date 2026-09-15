@@ -124,6 +124,13 @@ public class Main extends SharedActivity {
                     ZennKuyBridge.sTokenDelivered = true;
                 }
 
+                // Dismiss the WebView overlay.
+                // When openAsResult() launches Chrome externally, the grow:// redirect
+                // arrives here via onNewIntent — it bypasses WebViewManager.handleGrowUrl()
+                // which normally calls HideWebView(). Without this call the WebView stays
+                // on top of the game after token delivery, causing the "stuck on please wait" UI.
+                webViewManager.HideWebView();
+
                 // Single delivery path: OnDeepLinkProcess receives the full info+token payload.
                 if (mGLView != null) {
                     mGLView.post(() -> NativeAppInterface.OnDeepLinkProcess(payload));
@@ -184,13 +191,8 @@ public class Main extends SharedActivity {
 
     /**
      * Dispatches the Google Sign-In SDK result to GoogleSignInHelper.
-     *
-     * Real Growlauncher calls super only and drops the SDK result entirely.
-     * V3 improves on this by dispatching to handleSignInResult (requestCode 9001)
-     * so the Google ID token is actually extracted and delivered to the engine.
-     *
-     * Request code 1 (openAsResult Chrome browser OAuth) is handled separately
-     * through onNewIntent → handleIntent — not here.
+     * RC 9001 is a no-op stub since GoogleSignInHelper.SignIn() no longer
+     * launches the SDK account picker. Kept for safety.
      */
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
