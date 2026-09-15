@@ -311,18 +311,74 @@ public class WebViewManager {
         }
 
         @Override
+        public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+            return interceptUrl(request.getUrl().toString());
+        }
+
+        @Override
+        @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView view, String url) {
-            // Match v5.57: return false so the WebView follows all redirects natively.
-            // The old implementation called view.loadUrl() on every redirect which
-            // broke the Google OAuth chain — each step carries session state in
-            // redirect headers/cookies that loadUrl() discards by starting a fresh GET.
-            // External _blank links are handled by the onPageFinished JS injection.
+            return interceptUrl(url);
+        }
+
+        /**
+         * Intercepts {@code grow://} redirects that arrive at the tail of the Google OAuth
+         * chain — before they leave the WebView and become an Android Intent.
+         *
+         * <p><b>Why this matters:</b> Growtopia's server redirects the completed Google OAuth
+         * callback to {@code grow://growtopia?info=...&token=...}. In the Chrome flow that
+         * URL becomes an Android {@code ACTION_VIEW} Intent, which Android may route to the
+         * <em>official</em> Growtopia app if it is installed — causing the "login loops back"
+         * symptom. Inside the WebView we capture it here, deliver the token directly to the
+         * game engine via {@code nativeOnScriptCall("nativeSignIn", token)}, and hide the
+         * WebView — exactly matching v5.57 behaviour but without touching the Android Intent
+         * system.
+         *
+         * <p>All other URLs ({@code https://accounts.google.com/...},
+         * {@code https://login.growtopiagame.com/...}, etc.) return {@code false} so the
+         * WebView follows the full redirect chain natively, preserving the OAuth cookies and
+         * session state that break if you call {@code loadUrl()} on each hop.
+         */
+        private boolean interceptUrl(String url) {
+            if (url == null) return false;
+
+            if (url.startsWith("grow://")) {
+                // grow:// is the Growtopia custom scheme — the game's own deep-link format.
+                // Consume it here so it never becomes an Android Intent.
+                try {
+                    Uri uri = Uri.parse(url);
+                    String token = uri.getQueryParameter("token");
+                    String info  = uri.getQueryParameter("info");
+                    if (token != null && !token.isEmpty()) {
+                        final String safeToken = token;
+                        baseActivity.runOnUiThread(() -> {
+                            Log.d("WebView", "grow:// intercepted — delivering token to engine (len="
+                                    + safeToken.length() + ")");
+                            android.widget.Toast.makeText(Main.mainApp,
+                                    "Logging in with google... wait a moment...",
+                                    android.widget.Toast.LENGTH_SHORT).show();
+                            WebViewManager.this.HideWebView();
+                            WebViewManager.this.nativeOnScriptCall("nativeSignIn", safeToken);
+                        });
+                    } else {
+                        Log.w("WebView", "grow:// redirect had no token — url=" + url);
+                    }
+                } catch (Exception e) {
+                    Log.e("WebView", "grow:// intercept error: " + e);
+                }
+                return true; // Always consume grow:// — must not dispatch as Android Intent
+            }
+
+            // All other URLs: let the WebView follow redirects natively.
+            // Calling view.loadUrl() on each hop breaks the Google OAuth chain because
+            // every redirect carries session state in cookies and headers that loadUrl()
+            // silently discards by starting a fresh GET.
             return false;
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()");
             this.listener.OnPageLoaded(url);
         }
 
