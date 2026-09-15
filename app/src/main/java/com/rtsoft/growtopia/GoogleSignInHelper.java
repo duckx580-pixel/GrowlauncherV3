@@ -8,28 +8,28 @@ import android.os.Looper;
 import android.util.Log;
 
 /**
- * Google Sign-In — in-app WebView flow, fully contained inside the process.
+ * Google Sign-In — dashboard API WebView flow, fully contained inside the process.
  *
  * <p><b>Why not the Android Google Sign-In SDK?</b><br>
  * The Android SDK ({@code GoogleSignIn.getClient(...).getSignInIntent()}) always fails with
  * {@code DEVELOPER_ERROR} (status code 10) on debug-signed APKs because the SHA-1 fingerprint
  * is not registered in the Google Cloud project.
  *
- * <p><b>Why not Chrome?</b><br>
- * Opening Chrome means the final {@code grow://growtopia?token=...} redirect becomes an Android
- * {@code ACTION_VIEW} Intent. If the official Growtopia app is installed and also handles the
- * {@code grow://} scheme, Android routes the token to it — silently swallowing the login and
- * causing the "loops back to Google" symptom.
+ * <p><b>Why not the standard OAuth URL (LoadURLPost)?</b><br>
+ * The standard OAuth flow ends with a {@code grow://growtopia?token=...} redirect.
+ * If the official Growtopia app is installed and also handles the {@code grow://} scheme,
+ * Android routes the token to it instead of V3 — silently swallowing the login and causing
+ * the "loops back to Google" symptom. Even inside a WebView, the redirect can fail silently
+ * on some devices.
  *
- * <p><b>Actual flow:</b><br>
- * {@code libgrowtopia.so} calls {@link WebViewManager#LoadURLPost} with the Google OAuth URL
- * <em>before</em> calling {@code SignIn()}.  {@code LoadURLPost} opens the WebView and POSTs
- * to {@code accounts.google.com} — the OAuth flow is already running by the time
- * {@code SignIn()} arrives.  When Google authentication completes, Growtopia's server redirects
- * to {@code grow://growtopia?token=...}.  {@link WebViewManager.WebViewClientImpl#interceptUrl}
- * catches this redirect <em>inside the WebView</em> and calls
- * {@code nativeOnScriptCall("nativeSignIn", token)} directly — without dispatching any Android
- * Intent, and without any risk of the official app intercepting the token.
+ * <p><b>Actual flow (dashboard API, same as Genta Hax v5.53 "Start Resolving"):</b><br>
+ * {@link ZennKuyBridge#startResolving()} loads the Growtopia dashboard URL
+ * ({@code https://login.growtopiagame.com/player/login/dashboard?valKey=...}) in the in-app
+ * WebView. After the user authenticates with Google, the dashboard page calls
+ * {@code NativeApp.nativeSignIn(ltoken)} from its own JavaScript.
+ * {@link WebViewManager.WebViewJavascriptInterface#nativeSignIn} picks this up and delivers
+ * the token to the engine via {@code nativeOnScriptCall("nativeSignIn", token)} — no
+ * {@code grow://} redirect involved at all.
  */
 public class GoogleSignInHelper {
     private static final String TAG = "GoogleSignInHelper";
@@ -54,32 +54,16 @@ public class GoogleSignInHelper {
     public void Init() {}
     public void SignOut() {}
 
-    // ── Entry point called by the native engine ────────────────────────────────────────
+    // ── Entry point called by the native engine ──────────────────────────────────────────────
     /**
-     * Ensures the in-app WebView Google OAuth flow is running — no Chrome, no Android SDK.
+     * Delegates immediately to {@link ZennKuyBridge#startResolving()} which handles
+     * ltoken spoof injection or dashboard-API Google OAuth as appropriate.
      *
-     * <p><b>Normal path (engine already opened the WebView):</b><br>
-     * {@code libgrowtopia.so} always calls {@link WebViewManager#LoadURLPost} with the Google
-     * OAuth URL <em>before</em> it calls {@code SignIn()} on the Java side. {@code LoadURLPost}
-     * shows the WebView and begins POSTing to {@code accounts.google.com}. When {@code SignIn()}
-     * arrives, the WebView is already visible and the OAuth flow is in progress — we simply
-     * confirm this and let it continue. {@link WebViewManager.WebViewClientImpl#interceptUrl}
-     * catches the trailing {@code grow://growtopia?token=…} redirect internally, so the token
-     * is delivered to the engine without ever becoming an Android Intent (which the official
-     * Growtopia app, if installed, would otherwise intercept).
-     *
-     * <p><b>Fallback path (WebView not yet visible):</b><br>
-     * If, for any reason, the WebView is not showing when {@code SignIn()} fires (e.g. ltoken
-     * spoof consumed the call, or a timing edge case), {@link ZennKuyBridge#startResolving()}
-     * replays the stored OAuth URL through the WebView — or injects a cached ltoken directly
-     * if one is available.
-     *
-     * <p><b>Why not Chrome?</b><br>
-     * Opening Chrome via {@code ACTION_VIEW} means the final {@code grow://} redirect leaves
-     * the app and is dispatched as an Android Intent. If the official Growtopia app is installed
-     * and also registered for the {@code grow://} scheme, Android routes the token to it instead
-     * of V3 — silently swallowing the login. The in-app WebView keeps the entire OAuth chain
-     * inside our process.
+     * <p>The previous "WebView already visible, do nothing" path was insufficient: the
+     * engine's {@link WebViewManager#LoadURLPost} opens the WebView with the standard
+     * Growtopia OAuth URL, which terminates with a {@code grow://} redirect that either
+     * goes to the official app or fails silently. We now always redirect to the dashboard
+     * URL instead.
      */
     public void SignIn() {
         if (Main.mainApp == null) {
@@ -88,22 +72,20 @@ public class GoogleSignInHelper {
         }
 
         mainActivity.runOnUiThread(() -> {
-            WebViewManager wvm = Main.mainApp.webViewManager;
-
-            if (wvm != null && wvm.IsVisible()) {
-                // Normal path: LoadURLPost already opened the WebView with the Google OAuth page.
-                // The grow:// callback is intercepted in WebViewClientImpl — nothing to do here.
-                Log.d(TAG, "SignIn: WebView already visible (LoadURLPost ran first) — OAuth in progress");
-                spoof.setGoogleLogs("WebView Google OAuth in progress");
-                return;
-            }
-
-            // Fallback: WebView not visible — either ltoken spoof fired, or the engine called
-            // SignIn() before LoadURLPost (unusual).  ZennKuyBridge handles both cases:
-            // if an ltoken is stored it injects it immediately; otherwise it replays the
-            // stored OAuth URL through the WebView.
-            Log.d(TAG, "SignIn: WebView not visible — delegating to ZennKuyBridge");
-            spoof.setGoogleLogs("Triggering WebView Google OAuth via ZennKuyBridge");
+            // Always delegate to ZennKuyBridge.
+            //
+            // The normal path (engine calls LoadURLPost before SignIn) opened the WebView with
+            // the standard Growtopia OAuth URL, which ends with a grow:// redirect.  That
+            // redirect either gets intercepted by the official Growtopia app (if installed) or
+            // fails silently — both cause the "loops back to Google" symptom.
+            //
+            // ZennKuyBridge.startResolving() checks ltoken spoof first (instant login), then
+            // falls through to triggerWebViewLogin() which loads the Growtopia DASHBOARD URL
+            // instead.  The dashboard page calls NativeApp.nativeSignIn(token) from its own
+            // JavaScript after Google auth completes — no grow:// redirect needed at all.
+            // This is the same mechanism Genta Hax v5.53 "Start Resolving" uses.
+            Log.d(TAG, "SignIn: delegating to ZennKuyBridge (dashboard API path)");
+            spoof.setGoogleLogs("Triggering dashboard API Google OAuth via ZennKuyBridge");
             ZennKuyBridge.startResolving();
         });
     }
@@ -116,7 +98,7 @@ public class GoogleSignInHelper {
         Log.d(TAG, "handleSignInResult called (SDK no longer used) — ignoring");
     }
 
-    // ── Token delivery on the GL thread ──────────────────────────────────────
+    // ── Token delivery on the GL thread ──────────────────────────────────────────────
     // Used only if some external path calls OnSignIn directly (e.g. ltoken spoof).
     private static final int MAX_DELIVER_RETRIES = 40; // ~4s at 100ms
     private final Handler deliverHandler = new Handler(Looper.getMainLooper());
