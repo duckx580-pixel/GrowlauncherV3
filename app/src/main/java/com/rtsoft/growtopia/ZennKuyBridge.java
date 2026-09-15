@@ -8,6 +8,22 @@ public final class ZennKuyBridge {
 
     private ZennKuyBridge() {}
 
+    /**
+     * Set to {@code true} the moment the JS interface (or interceptUrl) delivers a
+     * non-empty token to the engine via {@code nativeOnScriptCall("nativeSignIn", token)}.
+     *
+     * <p>Once set, {@link #startResolving()} short-circuits and does NOT load the
+     * dashboard URL.  Without this guard the engine calls {@code SignIn()} as a retry
+     * after the WebView is already hidden (OAuth completed), {@code IsVisible()} returns
+     * false, and {@code triggerWebViewLogin()} loads the dashboard — firing a second
+     * {@code nativeSignIn} that disrupts the running auth attempt and causes
+     * "Please try login again."
+     *
+     * <p>Reset to {@code false} at the start of each new auth session
+     * ({@code LoadURLPost} no-spoof path).
+     */
+    public static volatile boolean sTokenDelivered = false;
+
     private static LoginSpoof spoof() {
         if (Main.mainApp == null) return null;
         return new LoginSpoof(Main.mainApp);
@@ -48,6 +64,7 @@ public final class ZennKuyBridge {
      *
      * <p>Priority order:
      * <ol>
+     *   <li>Token already delivered this session → return immediately (no dashboard reload).</li>
      *   <li>ltoken spoof enabled + ltoken present → inject immediately, no UI.</li>
      *   <li>ltoken spoof enabled + refresh token → exchange first, then inject.</li>
      *   <li>WebView already visible (OAuth flow started by LoadURLPost) → let it
@@ -59,6 +76,18 @@ public final class ZennKuyBridge {
     public static void startResolving() {
         try {
             if (Main.mainApp == null) return;
+
+            // 0. If a token was already delivered to the engine this session, bail out.
+            //    The engine sometimes calls SignIn() as a retry after the WebView is hidden
+            //    (OAuth just completed).  Without this guard, IsVisible() returns false
+            //    (WebView was hidden in nativeSignIn handler), triggerWebViewLogin() fires,
+            //    the dashboard page calls nativeSignIn a second time, and the double-token
+            //    delivery causes "Please try login again."
+            if (sTokenDelivered) {
+                Log.d(TAG, "startResolving: token already delivered — skipping dashboard redirect");
+                AppLogger.log(TAG, "startResolving: token already delivered, skipping");
+                return;
+            }
 
             // 1. ltoken spoof check.
             LoginSpoof spoof = spoofIfEnabled();

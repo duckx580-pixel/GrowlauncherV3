@@ -33,7 +33,7 @@ public class WebViewManager {
     boolean allowExternalLinks = true;
     private WebView webView = null;
 
-    // Fields used by the launcher’s native message handler
+    // Fields used by the launcher's native message handler
     public boolean needed_to_render = false;
     public String to_render = "";
     public String last_packet = "";
@@ -175,15 +175,12 @@ public class WebViewManager {
                     return;
                 }
 
-                // No spoof — show the WebView with the Growtopia OAuth URL now.
+                // No spoof — reset delivery flag and show WebView with the OAuth URL.
                 // This matches real GrowLauncher v5.57 behaviour: the engine calls
-                // LoadURLPost first, then SignIn().  By showing the WebView here the
-                // user sees the Google account picker immediately instead of the game
-                // hanging on the loading screen.
-                //
-                // interceptUrl checks both "token" and "info" query params, so the
-                // grow:// token is captured regardless of which redirect path the
-                // Growtopia server uses for this device.
+                // LoadURLPost first, then SignIn().  Resetting sTokenDelivered here ensures
+                // a fresh auth session — if the user retaps Play Online after a failed
+                // attempt the flag from the previous attempt won't block the next one.
+                ZennKuyBridge.sTokenDelivered = false;
                 AppLogger.log("WebViewManager", "LoadURLPost: showing WebView with OAuth URL");
                 Log.d("WebViewManager", "LoadURLPost: showing WebView (v5.57 path)");
                 showAndPostUrl(url, postData);
@@ -274,7 +271,14 @@ public class WebViewManager {
         @JavascriptInterface
         public void nativeSignIn(String token) {
             AppLogger.log("JSInterface", "nativeSignIn callback fired — token len=" + (token != null ? token.length() : "null"));
-            Log.d("JSInterface", "nativeSignIn: " + token);
+            Log.d("JSInterface", "nativeSignIn: token len=" + (token != null ? token.length() : 0));
+            if (token != null && !token.isEmpty()) {
+                // Mark token as delivered BEFORE calling nativeOnScriptCall.
+                // This ensures any concurrent SignIn() → startResolving() call that
+                // runs while nativeOnScriptCall is in flight will see the flag and
+                // bail out instead of loading the dashboard URL on top of us.
+                ZennKuyBridge.sTokenDelivered = true;
+            }
             android.widget.Toast.makeText(
                     Main.mainApp, "Logging in with google... wait a moment...",
                     android.widget.Toast.LENGTH_SHORT).show();
@@ -363,8 +367,12 @@ public class WebViewManager {
                     }
                     if (token != null && !token.isEmpty()) {
                         final String safeToken = token;
+                        // Mark delivered before posting to UI thread — any concurrent
+                        // startResolving() will see the flag even if it runs before
+                        // the UI-thread runnable below.
+                        ZennKuyBridge.sTokenDelivered = true;
                         baseActivity.runOnUiThread(() -> {
-                            AppLogger.log("WebView", "grow:// delivering token to engine (len=" + safeToken.length() + ") — LOGIN SHOULD COMPLETE");
+                            AppLogger.log("WebView", "grow:// delivering token (len=" + safeToken.length() + ") — LOGIN SHOULD COMPLETE");
                             Log.d("WebView", "grow:// delivering token (len=" + safeToken.length() + ")");
                             android.widget.Toast.makeText(Main.mainApp,
                                     "Logging in with google... wait a moment...",
