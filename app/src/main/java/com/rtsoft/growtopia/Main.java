@@ -56,15 +56,72 @@ public class Main extends SharedActivity {
     }
     public static WebViewManager GetWebViewManager() { return mainApp.webViewManager; }
 
+    /**
+     * Dispatches a {@code grow://} URI to the game engine via
+     * {@link NativeAppInterface#OnDeepLinkProcess(String)}, mirroring real
+     * Growlauncher v5.57 exactly.
+     *
+     * <p>For the Google OAuth callback the URI is:
+     * {@code grow://login?token=SESSION_TOKEN[&info=...][&name=...]}
+     *
+     * <p>{@code uri.getSchemeSpecificPart()} for {@code grow://login?token=TOKEN}
+     * produces {@code //login?token=TOKEN}. libgrowtopia.so parses this string
+     * internally to extract the session token and complete the login — no further
+     * token extraction is needed on the Java side.
+     *
+     * <p>The call is posted to the GL render thread via {@code mGLView.post()},
+     * consistent with how libgrowtopia.so expects {@code OnDeepLinkProcess} to arrive.
+     *
+     * @param intent the incoming intent whose {@code getData()} is the {@code grow://} URI.
+     * @return {@code true} if dispatched; {@code false} if intent or URI data was null.
+     */
     public static boolean HandleDeeplink(Intent intent) {
+        if (intent == null) return false;
         final Uri data = intent.getData();
         if (data == null) return false;
-        Log.d("URL host", "" + data.getHost());
-        Log.d("URL data", data.toString());
-        SharedActivity.mGLView.post(() -> {
-            NativeAppInterface.OnDeepLinkProcess(data.getSchemeSpecificPart());
-        });
+        final String schemeSpecificPart = data.getSchemeSpecificPart();
+        Log.d("Main", "HandleDeeplink: scheme=" + data.getScheme()
+            + " host=" + data.getHost()
+            + " schemeSpecificPart=" + schemeSpecificPart);
+        AppLogger.log("Main", "HandleDeeplink: OnDeepLinkProcess — " + schemeSpecificPart);
+        // Post to the GL render thread — OnDeepLinkProcess is a JNI call that
+        // libgrowtopia.so expects on its own thread (same pattern as real GL v5.57).
+        SharedActivity.mGLView.post(() ->
+            NativeAppInterface.OnDeepLinkProcess(schemeSpecificPart));
         return true;
+    }
+
+    /**
+     * Handles incoming {@code grow://} intents.
+     *
+     * <p>Called from {@link #onCreate} (launch intent) and {@link #onNewIntent}
+     * (Chrome returning after Google OAuth completes).
+     *
+     * <p>All {@code grow://} URIs — including the Google OAuth callback
+     * {@code grow://login?token=SESSION_TOKEN} — are forwarded to
+     * {@link #HandleDeeplink}, which posts them to the GL thread via
+     * {@link NativeAppInterface#OnDeepLinkProcess}.
+     *
+     * <p>No {@code nativeOnScriptCall("nativeSignIn", token)} is used.
+     * No WebView interaction is required. No {@code hideWebViewSync()} needed.
+     * This is the same dispatch path real Growlauncher v5.57 uses.
+     */
+    private void handleIntent(Intent intent) {
+        if (intent == null) return;
+        if (!"android.intent.action.VIEW".equals(intent.getAction())) return;
+        Uri data = intent.getData();
+        if (data == null) return;
+        String scheme = data.getScheme();
+        Log.d("Main", "handleIntent: scheme=" + scheme + " uri=" + data);
+        AppLogger.log("Main", "handleIntent: scheme=" + scheme);
+        if ("grow".equals(scheme)) {
+            // grow:// — covers the Google OAuth callback (grow://login?token=...)
+            // and all other Growtopia deep-links. Dispatch via HandleDeeplink so
+            // the engine receives uri.getSchemeSpecificPart() on the GL thread.
+            HandleDeeplink(intent);
+        }
+        // Other schemes (http, https, …) are not produced by the grow:// OAuth
+        // flow. Add handling below if other deep-link types are needed.
     }
 
     // Native methods in libzennkuy.so
@@ -94,52 +151,6 @@ public class Main extends SharedActivity {
                 View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
-        }
-    }
-
-    private void handleIntent(Intent intent) {
-        if (intent == null) return;
-        if (!"android.intent.action.VIEW".equals(intent.getAction())) return;
-        try {
-            Uri data = intent.getData();
-            if (data == null) return;
-            String info = data.getQueryParameter("info");
-            String token = data.getQueryParameter("token");
-            if (info != null || token != null) {
-                // Google OAuth redirect via Chrome: grow://growtopia?token=...&info=...
-                // onNewIntent fires on the UI thread so we can sync-hide here.
-                final String safeInfo  = info  != null ? info  : "";
-                final String safeToken = token != null ? token : "";
-                Log.d("Main", "handleIntent: Google OAuth grow:// received — token len="
-                        + safeToken.length() + " info len=" + safeInfo.length());
-
-                if (!safeToken.isEmpty() || !safeInfo.isEmpty()) {
-                    ZennKuyBridge.sTokenDelivered = true;
-                }
-
-                // Sync-hide the WebView BEFORE nativeOnScriptCall.
-                // handleIntent runs on the UI thread (called from onNewIntent).
-                // HideWebView() is async (executor → UI thread) so nativeOnScriptCall
-                // would fire while the WebView is still VISIBLE, causing silent failure.
-                // hideWebViewSync() runs immediately on this thread.
-                webViewManager.hideWebViewSync();
-
-                final String actualToken = !safeToken.isEmpty() ? safeToken : safeInfo;
-                if (!actualToken.isEmpty()) {
-                    Log.d("Main", "handleIntent: calling nativeOnScriptCall(nativeSignIn) — token len=" + actualToken.length());
-                    AppLogger.log("Main", "handleIntent: delivering token to engine — len=" + actualToken.length());
-                    webViewManager.nativeOnScriptCall("nativeSignIn", actualToken);
-                } else {
-                    Log.w("Main", "handleIntent: grow:// redirect had no usable token — login may fail");
-                }
-
-                // Schedule full WebView destruction after token delivery.
-                webViewManager.HideWebView();
-            } else {
-                HandleDeeplink(intent);
-            }
-        } catch (Exception e) {
-            Log.e("Main", "handleIntent error: " + e.getMessage());
         }
     }
 
@@ -191,20 +202,11 @@ public class Main extends SharedActivity {
 
     /**
      * Dispatches the Google Sign-In SDK result to GoogleSignInHelper.
-     *
-     * Request code 1 is reserved for Chrome/browser OAuth launches
-     * (nativeSignIn("") and openAsResult()). Chrome opens as a separate
-     * task and immediately returns RESULT_CANCELED — forwarding that to the
-     * SDK would trigger a failed-sign-in callback and show a second Cancel
-     * button in-game (the Cancel #2 bug). RC 1 is therefore excluded.
+     * RC 1 is excluded — that is the Chrome browser launch request code.
      */
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        // Do NOT forward RC 1 to the SDK — that is the Chrome browser launch
-        // request code. Chrome returns RESULT_CANCELED immediately (it opens
-        // as a separate task), which the SDK misinterprets as a failed sign-in
-        // and triggers a second Cancel dialog in-game.
         if (requestCode != 1 && googleSignInHelper != null) {
             googleSignInHelper.handleSignInResult(requestCode, resultCode, data);
         }
@@ -272,6 +274,8 @@ public class Main extends SharedActivity {
     @Override
     public void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        // Keep getIntent() current — some engine callbacks call getIntent() after onNewIntent.
+        setIntent(intent);
         handleIntent(intent);
     }
 

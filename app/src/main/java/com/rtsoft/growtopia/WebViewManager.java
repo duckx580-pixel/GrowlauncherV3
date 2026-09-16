@@ -34,10 +34,20 @@ public class WebViewManager {
     private WebView webView = null;
 
     /**
-     * Google OAuth URL — used by nativeSignIn("") to open Chrome directly.
-     * This is the /google endpoint, not the /dashboard endpoint.
-     * The /google endpoint starts the OAuth redirect without requiring the
-     * NativeApp JS bridge (which only exists inside the in-app WebView, not Chrome).
+     * Google OAuth URL — the Growtopia Google login endpoint.
+     *
+     * <p>When opened in Chrome, the server responds with HTTP 302 to:
+     * {@code https://accounts.google.com/v3/signin/accountchooser
+     *   ?client_id=389994132396-4s6ol46f60831v5blfpci7lnmsdnh8br.apps.googleusercontent.com
+     *   &redirect_uri=https://login.growtopiagame.com/google/callback
+     *   &response_type=code&scope=openid+profile+email&state=<server-nonce>
+     *   &prompt=select_account}
+     *
+     * <p>Chrome follows this redirect chain natively. After the user picks an
+     * account Google returns to the Growtopia callback, the server exchanges the
+     * code for a session token and issues HTTP 302 to
+     * {@code grow://login?token=SESSION_TOKEN}. Android routes that URI back to
+     * the app via the {@code <intent-filter>} in AndroidManifest.xml.
      */
     private static final String GOOGLE_LOGIN_URL =
         "https://login.growtopiagame.com/player/login/google?valKey=40db4045f2d8c572efe8c4a060605726";
@@ -100,27 +110,12 @@ public class WebViewManager {
         this.webView.removeJavascriptInterface("NativeApp");
         this.webView.destroy();
         this.webView = null;
-        // NOTE: ClearCookieWebData() is intentionally NOT called here.
-        // Clearing cookies on hide wipes Google auth cookies before the next
-        // auth attempt starts, causing "Continue with Google" to hang on retry.
-        // Cookies are cleared at the top of LoadURLPost (no-spoof path) instead,
-        // so they are only nuked when a brand-new auth session begins.
     }
 
     /**
      * Synchronously stops loading and hides the WebView on the calling (UI) thread.
-     *
-     * <p>Unlike {@link #HideWebView()} which dispatches through the executor,
-     * this method sets the WebView to GONE immediately so that no active WebView
-     * is present when {@link #nativeOnScriptCall} fires for token delivery.
-     *
-     * <p>This is critical because libgrowtopia.so silently ignores
-     * {@code nativeOnScriptCall("nativeSignIn", token)} when a WebView is alive —
-     * the same reason the spoof path in {@link #LoadURLPost} works
-     * (it calls nativeOnScriptCall before ShowWebView() is ever called).
-     *
-     * <p>Must be called on the UI thread. Call {@link #HideWebView()} afterwards
-     * to schedule full WebView destruction through the normal async path.
+     * Kept for any remaining WebView usage (e.g. non-login WebView popups).
+     * Not used in the Chrome-external Google login flow.
      */
     void hideWebViewSync() {
         WebView wv = this.webView;
@@ -132,14 +127,46 @@ public class WebViewManager {
     }
 
     /**
-     * Handles {@code grow://} deep-link URLs that arrive at the tail of the Google OAuth chain.
+     * Opens the Growtopia Google login endpoint in the system browser (Chrome).
      *
-     * <p>This method is called from both the main WebView's {@link WebViewClientImpl} and from
-     * the Google account-chooser popup WebView's client, so that the token redirect is caught
-     * regardless of which window it lands in.
+     * <p>Chrome follows the server's HTTP 302 redirect chain automatically:
+     * <ol>
+     *   <li>{@code login.growtopiagame.com/player/login/google?valKey=...}</li>
+     *   <li>{@code accounts.google.com/v3/signin/accountchooser?client_id=389994132396-...}</li>
+     *   <li>User picks Google account</li>
+     *   <li>{@code login.growtopiagame.com/google/callback?code=...&state=...}</li>
+     *   <li>{@code grow://login?token=SESSION_TOKEN} (Android intent-filter catches this)</li>
+     * </ol>
      *
-     * @return {@code true} if the URL was a {@code grow://} link and has been consumed;
-     *         {@code false} for all other URLs (let the WebView follow them natively).
+     * <p>Android delivers the {@code grow://} URI to {@link Main#onNewIntent}, which
+     * calls {@code handleIntent} → {@link Main#HandleDeeplink} →
+     * {@code NativeAppInterface.OnDeepLinkProcess(schemeSpecificPart)}.
+     *
+     * <p>No in-app WebView is created. The game's "Getting server address…" overlay
+     * never appears because the game UI remains in its pre-login state throughout.
+     */
+    static void launchGoogleLogin(Activity activity) {
+        Uri loginUri = Uri.parse(GOOGLE_LOGIN_URL);
+        Intent intent = new Intent(Intent.ACTION_VIEW, loginUri);
+        // FLAG_ACTIVITY_NEW_TASK: Chrome opens in its own task.
+        // The grow:// callback is routed back to the launcher's main task via
+        // onNewIntent because the grow:// intent-filter targets the Main activity.
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Log.d("WebViewManager", "launchGoogleLogin: opening system browser for Google OAuth");
+        AppLogger.log("WebViewManager", "launchGoogleLogin: launching Chrome — " + GOOGLE_LOGIN_URL);
+        try {
+            activity.startActivity(intent);
+        } catch (android.content.ActivityNotFoundException e) {
+            // No browser installed — extremely rare on consumer Android.
+            Log.e("WebViewManager", "launchGoogleLogin: no browser found: " + e.getMessage());
+            AppLogger.warn("WebViewManager", "launchGoogleLogin: ActivityNotFoundException — no browser installed");
+        }
+    }
+
+    /**
+     * Handles {@code grow://} deep-link URLs that arrive inside an in-app WebView.
+     * Used as a safety net if a WebView is ever shown and receives a grow:// redirect.
+     * In the Chrome-external flow this is normally not reached.
      */
     boolean handleGrowUrl(String url) {
         if (url == null || !url.startsWith("grow://")) return false;
@@ -148,45 +175,29 @@ public class WebViewManager {
         Log.d("WebView", "grow:// intercepted — full url=" + url);
         try {
             Uri uri = Uri.parse(url);
-            // Try "token" first (standard grow:// OAuth redirect).
-            // Fall back to "info" — the Growtopia dashboard page uses "info" instead
-            // of "token" as the ltoken parameter in its grow:// redirect.
             String token = uri.getQueryParameter("token");
             if (token == null || token.isEmpty()) {
                 token = uri.getQueryParameter("info");
                 if (token != null && !token.isEmpty()) {
                     AppLogger.log("WebView", "grow:// token found in 'info' param (len=" + token.length() + ")");
-                    Log.d("WebView", "grow:// — token was in 'info' param (len=" + token.length() + ")");
                 }
             }
             if (token != null && !token.isEmpty()) {
                 final String safeToken = token;
-                // Mark delivered before posting to UI thread — any concurrent
-                // startResolving() will see the flag even if it runs before
-                // the UI-thread runnable below.
                 ZennKuyBridge.sTokenDelivered = true;
                 baseActivity.runOnUiThread(() -> {
-                    AppLogger.log("WebView", "grow:// delivering token (len=" + safeToken.length() + ") — calling nativeOnScriptCall on UI thread");
-                    Log.d("WebView", "grow:// delivering token (len=" + safeToken.length() + ")");
-                    android.widget.Toast.makeText(Main.mainApp,
-                            "Logging in with google... wait a moment...",
-                            android.widget.Toast.LENGTH_SHORT).show();
-                    // Sync-hide before nativeOnScriptCall — libgrowtopia.so silently
-                    // ignores nativeOnScriptCall("nativeSignIn") while a WebView is
-                    // active. This mirrors the spoof path which fires with no WebView.
-                    WebViewManager.this.hideWebViewSync();
+                    AppLogger.log("WebView", "grow:// delivering token via nativeOnScriptCall (len=" + safeToken.length() + ")");
+                    this.hideWebViewSync();
                     WebViewManager.this.nativeOnScriptCall("nativeSignIn", safeToken);
-                    // Schedule full destruction after token is delivered.
                     WebViewManager.this.HideWebView();
                 });
             } else {
-                AppLogger.warn("WebView", "grow:// had NO token or info param — login will fail! url=" + url);
-                Log.w("WebView", "grow:// redirect had no token or info param — url=" + url);
+                AppLogger.warn("WebView", "grow:// had NO token — url=" + url);
             }
         } catch (Exception e) {
             Log.e("WebView", "grow:// intercept error: " + e);
         }
-        return true; // Always consume grow:// — must not dispatch as Android Intent
+        return true;
     }
 
     public synchronized void ShowWebView() {
@@ -209,10 +220,6 @@ public class WebViewManager {
             settings.setJavaScriptEnabled(true);
             settings.setLoadsImagesAutomatically(true);
             settings.setDomStorageEnabled(true);
-            // Required for Google OAuth account-chooser popup:
-            // The Growtopia login page calls window.open() to launch the Google account
-            // chooser. Without these two flags the popup is silently blocked and the
-            // user never sees the "Choose an account" screen.
             settings.setSupportMultipleWindows(true);
             settings.setJavaScriptCanOpenWindowsAutomatically(true);
 
@@ -221,42 +228,27 @@ public class WebViewManager {
             wv.setLayoutParams(new RelativeLayout.LayoutParams(-1, -1));
             wv.addJavascriptInterface(new WebViewJavascriptInterface(this), "NativeApp");
 
-            // WebChromeClient handles window.open() popup requests.
-            // When the user taps "Continue with Google" on the Growtopia login page,
-            // the page opens the Google account chooser in a popup window. We create
-            // a full-screen child WebView for it so it renders on top of the main view.
-            // If the OAuth callback (grow://) lands inside the popup we intercept it
-            // via handleGrowUrl() — same handler used by the main WebView.
             wv.setWebChromeClient(new WebChromeClient() {
                 @Override
                 public boolean onCreateWindow(WebView view, boolean isDialog,
                                               boolean isUserGesture,
                                               android.os.Message resultMsg) {
-                    Log.d("WebViewManager", "onCreateWindow: Google OAuth popup requested");
-                    AppLogger.log("WebViewManager", "onCreateWindow: creating Google account-chooser popup WebView");
-
+                    Log.d("WebViewManager", "onCreateWindow: popup WebView requested");
                     final WebView popup = new WebView(baseActivity);
                     popup.setLayoutParams(new RelativeLayout.LayoutParams(-1, -1));
-
                     WebSettings popupSettings = popup.getSettings();
                     popupSettings.setJavaScriptEnabled(true);
                     popupSettings.setDomStorageEnabled(true);
-
-                    // Intercept grow:// inside the popup too — Google may redirect
-                    // back through the popup window instead of the parent.
                     popup.setWebViewClient(new WebViewClient() {
                         @Override
-                        public boolean shouldOverrideUrlLoading(WebView v,
-                                                                WebResourceRequest req) {
+                        public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
                             String url = req.getUrl().toString();
                             if (handleGrowUrl(url)) {
-                                // Token delivered — close popup immediately
                                 baseActivity.runOnUiThread(() -> closePopup(popup));
                                 return true;
                             }
-                            return false; // let popup WebView follow navigation natively
+                            return false;
                         }
-
                         @Override
                         @SuppressWarnings("deprecation")
                         public boolean shouldOverrideUrlLoading(WebView v, String url) {
@@ -267,19 +259,14 @@ public class WebViewManager {
                             return false;
                         }
                     });
-
                     popup.setWebChromeClient(new WebChromeClient() {
                         @Override
                         public void onCloseWindow(WebView w) {
-                            Log.d("WebViewManager", "onCloseWindow: Google popup closing");
                             baseActivity.runOnUiThread(() -> closePopup(w));
                         }
                     });
-
                     ((SharedActivity) baseActivity).mViewGroup.addView(popup);
-
-                    WebView.WebViewTransport transport =
-                            (WebView.WebViewTransport) resultMsg.obj;
+                    WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
                     transport.setWebView(popup);
                     resultMsg.sendToTarget();
                     return true;
@@ -293,14 +280,12 @@ public class WebViewManager {
         this.webView.setVisibility(android.view.View.VISIBLE);
     }
 
-    /** Safely removes a popup WebView from the view hierarchy and destroys it. */
     private void closePopup(WebView popup) {
         if (popup == null) return;
         ViewGroup parent = (ViewGroup) popup.getParent();
         if (parent != null) parent.removeView(popup);
         popup.stopLoading();
         popup.destroy();
-        Log.d("WebViewManager", "closePopup: Google OAuth popup destroyed");
     }
 
     public void LoadURL(final String url, final boolean allowExternal) {
@@ -323,8 +308,7 @@ public class WebViewManager {
                     this.last_packet = new String(postData, java.nio.charset.StandardCharsets.ISO_8859_1);
                 }
 
-                // Check ltoken spoof first — if a stored credential is available,
-                // skip the WebView entirely and inject it straight into the engine.
+                // Fast path: stored ltoken — inject directly without any browser or WebView.
                 LoginSpoof spoof = getActiveSpoof();
                 if (spoof != null) {
                     String ltoken = spoof.getLtoken();
@@ -342,29 +326,25 @@ public class WebViewManager {
                                 nativeOnScriptCall("nativeSignIn", lt);
                             }
                             @Override public void onFailure(String msg, String raw) {
-                                Log.w("WebViewManager", "refresh->ltoken failed: " + msg + " — falling back to WebView");
-                                baseActivity.runOnUiThread(() -> showAndPostUrl(url, postData));
+                                Log.w("WebViewManager", "refresh->ltoken failed: " + msg + " — falling back to Chrome");
+                                baseActivity.runOnUiThread(() -> launchGoogleLogin(baseActivity));
                             }
                         });
                         return;
                     }
-                    // Spoof enabled but no tokens — fall through to WebView.
-                    Log.w("WebViewManager", "ltoken spoof enabled but no tokens stored; showing WebView");
-                    showAndPostUrl(url, postData);
-                    return;
+                    // Spoof enabled but no tokens — fall through to Chrome.
+                    Log.w("WebViewManager", "ltoken spoof enabled but no tokens stored; launching Chrome");
                 }
 
-                // No spoof — new auth session starting.
-                // Clear cookies NOW (before showing WebView) so stale Growtopia
-                // session data from a previous attempt cannot interfere with the
-                // fresh OAuth flow.  Clearing here (not in HideWebView/DestroyWebView)
-                // means Google auth cookies survive the hide→show cycle on retry,
-                // so "Continue with Google" works on second and subsequent attempts.
+                // Chrome-external flow — open system browser for Google OAuth.
+                // No in-app WebView is created; the game's "Getting server address…"
+                // overlay never appears.
+                // The grow:// redirect comes back via:
+                //   onNewIntent → handleIntent → HandleDeeplink → OnDeepLinkProcess
                 ZennKuyBridge.sTokenDelivered = false;
-                ClearCookieWebData();
-                AppLogger.log("WebViewManager", "LoadURLPost: showing WebView with OAuth URL");
-                Log.d("WebViewManager", "LoadURLPost: showing WebView (v5.57 path)");
-                showAndPostUrl(url, postData);
+                AppLogger.log("WebViewManager", "LoadURLPost: Chrome external flow — bypassing in-app WebView");
+                Log.d("WebViewManager", "LoadURLPost: launching Chrome for Google OAuth — url=" + url);
+                launchGoogleLogin(baseActivity);
             })
         );
     }
@@ -452,21 +432,13 @@ public class WebViewManager {
         /**
          * Called by the Growtopia login page JS: {@code NativeApp.nativeSignIn(token)}
          *
-         * <p>Two cases:
+         * <p>In the Chrome-external flow this method is NOT expected to fire because
+         * no in-app WebView is shown for the login page. It is kept as a safety net
+         * in case a WebView is shown for another reason and the page calls this.
+         *
          * <ul>
-         *   <li><b>Empty token</b> — The page is signaling "start Google OAuth now."
-         *       Real Growlauncher v5.57 handles this by calling
-         *       {@code JNICall.notifyValueChanged(0, "google_login_btn", TRUE)} which
-         *       triggers libPowerKuy → {@code GoogleSignInHelper.SignIn()} → native
-         *       Android account picker popup.
-         *       V3 (no libPowerKuy) equivalent: hide the WebView and open Chrome
-         *       directly with the {@code /player/login/google} endpoint. Chrome follows
-         *       the full OAuth redirect chain; when complete, the server redirects to
-         *       {@code grow://} → {@link Main#onNewIntent} → {@link Main#handleIntent}
-         *       extracts the token and delivers it to the engine.</li>
-         *   <li><b>Non-empty token</b> — OAuth completed inside the WebView (popup flow).
-         *       Sync-hide the WebView first (so libgrowtopia.so processes the call
-         *       with no active WebView — matching the spoof path), then deliver.</li>
+         *   <li><b>Empty token</b> — launch Chrome for Google OAuth (belt-and-suspenders).</li>
+         *   <li><b>Non-empty token</b> — popup WebView flow fallback; sync-hide then deliver.</li>
          * </ul>
          */
         @JavascriptInterface
@@ -475,53 +447,25 @@ public class WebViewManager {
             Log.d("JSInterface", "nativeSignIn: token len=" + (token != null ? token.length() : 0));
 
             if (token == null || token.isEmpty()) {
-                // ── Empty token: page says "start Google OAuth" ──────────────────────────
-                // Real GL path: libPowerKuy → native account picker.
-                // V3 path: open Chrome with the Google OAuth URL — no SHA-1 check,
-                //           works on debug-signed APKs.  Chrome follows the redirect
-                //           chain and lands on grow:// when the user picks an account.
                 AppLogger.log("JSInterface", "nativeSignIn(\"\") — launching Chrome for Google OAuth");
-                Log.d("JSInterface", "nativeSignIn: empty token → opening Chrome with GOOGLE_LOGIN_URL");
                 WebViewManager.this.baseActivity.runOnUiThread(() -> {
-                    // Sync-hide the WebView before Chrome opens so it isn't
-                    // visible behind Chrome and can't fire concurrent events.
                     WebViewManager.this.hideWebViewSync();
-                    android.widget.Toast.makeText(Main.mainApp,
-                            "Opening Google sign-in...",
-                            android.widget.Toast.LENGTH_SHORT).show();
-                    try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(GOOGLE_LOGIN_URL));
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        WebViewManager.this.baseActivity.startActivity(intent);
-                    } catch (Exception e) {
-                        Log.e("JSInterface", "nativeSignIn: Chrome launch failed: " + e.getMessage());
-                    }
-                    // Schedule full WebView destruction after Chrome opens.
+                    launchGoogleLogin(WebViewManager.this.baseActivity);
                     WebViewManager.this.HideWebView();
                 });
                 return;
             }
 
-            // ── Non-empty token: OAuth completed (popup flow), deliver to game engine ──
-            // Must deliver on the UI thread — nativeOnScriptCall is a JNI call into
-            // libgrowtopia.so and the game engine only processes it from the UI/GL thread.
-            // CRITICAL: hideWebViewSync() must run before nativeOnScriptCall so the
-            // engine sees no active WebView — libgrowtopia.so silently ignores
-            // nativeOnScriptCall("nativeSignIn") while a WebView is alive.
-            // This matches the spoof path in LoadURLPost which calls nativeOnScriptCall
-            // before ShowWebView() is ever created.
+            // Non-empty token fallback: deliver via nativeOnScriptCall.
             final String safeToken = token;
             ZennKuyBridge.sTokenDelivered = true;
             WebViewManager.this.baseActivity.runOnUiThread(() -> {
                 android.widget.Toast.makeText(
                         Main.mainApp, "Logging in with google... wait a moment...",
                         android.widget.Toast.LENGTH_SHORT).show();
-                // Sync-hide BEFORE the JNI call.
                 WebViewManager.this.hideWebViewSync();
                 AppLogger.log("JSInterface", "nativeSignIn: calling nativeOnScriptCall — token len=" + safeToken.length());
-                Log.d("JSInterface", "nativeSignIn: nativeOnScriptCall(nativeSignIn, len=" + safeToken.length() + ")");
                 WebViewManager.this.nativeOnScriptCall("nativeSignIn", safeToken);
-                // Schedule full WebView destruction after token is delivered.
                 WebViewManager.this.HideWebView();
             });
         }
@@ -553,20 +497,9 @@ public class WebViewManager {
             );
         }
 
-        /**
-         * Called by Growtopia's login page JS: NativeApp.openAsResult(googleOAuthUrl)
-         *
-         * This is the SECONDARY path — some versions of the login page call this
-         * directly instead of relying on nativeSignIn("").  It opens Chrome (or the
-         * default browser) with the Google OAuth URL.  Chrome returns RESULT_CANCELED
-         * immediately (it never acts as a sub-activity), which the RC=1 guard in
-         * {@link Main#onActivityResult} safely discards.  The actual token arrives via
-         * the grow:// redirect → onNewIntent → handleIntent.
-         */
         @JavascriptInterface
         public void openAsResult(final String url) {
-            Log.d("JSInterface", "openAsResult: launching Chrome for Google OAuth — url=" + url);
-            AppLogger.log("JSInterface", "openAsResult: starting Chrome with Google OAuth URL");
+            Log.d("JSInterface", "openAsResult: launching Chrome — url=" + url);
             WebViewManager.this.baseActivity.runOnUiThread(() ->
                 WebViewManager.this.baseActivity.startActivityForResult(
                     new Intent(Intent.ACTION_VIEW, Uri.parse(url)), 1)
@@ -594,26 +527,14 @@ public class WebViewManager {
             return interceptUrl(url);
         }
 
-        /**
-         * Delegates {@code grow://} URLs to {@link WebViewManager#handleGrowUrl(String)}.
-         *
-         * <p>All other URLs return {@code false} so the WebView follows the full redirect
-         * chain natively, preserving OAuth cookies and session state.  Calling
-         * {@code view.loadUrl()} on each hop would break the Google OAuth chain because
-         * every redirect carries session state in cookies and headers that loadUrl()
-         * silently discards by starting a fresh GET.
-         */
         private boolean interceptUrl(String url) {
             if (url == null) return false;
-            // grow:// is the Growtopia custom scheme — extract and deliver the token.
-            // All other URLs (accounts.google.com, login.growtopiagame.com, …) return
-            // false so the WebView follows them natively.
             return WebViewManager.this.handleGrowUrl(url);
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()");
             this.listener.OnPageLoaded(url);
         }
 
@@ -669,11 +590,11 @@ public class WebViewManager {
     }
 
     private boolean isStaleWebViewDataDirectory(String name) {
-        return name.startsWith("app_webview_") && name.matches(".*\.\\d+$");
+        return name.startsWith("app_webview_") && name.matches(".*\\.\\d+$");
     }
 
     private boolean isStaleWebViewCacheDirectory(String name) {
-        return name.startsWith("webview_") && name.matches(".*\.\\d+$");
+        return name.startsWith("webview_") && name.matches(".*\\.\\d+$");
     }
 
     private void safeDeleteDatabase(String name) {
