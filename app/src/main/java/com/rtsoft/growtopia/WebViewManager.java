@@ -23,7 +23,6 @@ import android.webkit.WebViewClient;
 import android.widget.RelativeLayout;
 
 import java.io.File;
-import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -113,22 +112,12 @@ public class WebViewManager {
     // Device spoof injection
     // -----------------------------------------------------------------------
 
-    /**
-     * Parses a URL-encoded form body, replaces the known Growtopia device
-     * identifier parameters (mac, rid, gid) with the spoofed values stored
-     * by {@link DeviceSpoofer}, and returns the modified bytes.
-     *
-     * <p>Only called when the target URL is the Growtopia login dashboard.
-     * If parsing fails for any reason the original bytes are returned
-     * unchanged so the login still proceeds.
-     */
     private byte[] applyDeviceSpoof(byte[] postData) {
         if (postData == null || postData.length == 0) return postData;
         try {
             DeviceSpoofer sp = new DeviceSpoofer(baseActivity);
             String body = new String(postData, StandardCharsets.ISO_8859_1);
 
-            // Parse into an ordered map to preserve unknown parameters.
             Map<String, String> params = new LinkedHashMap<>();
             for (String pair : body.split("&")) {
                 int eq = pair.indexOf('=');
@@ -139,22 +128,11 @@ public class WebViewManager {
             }
 
             boolean changed = false;
-            if (params.containsKey("mac")) {
-                params.put("mac", sp.getMac());
-                changed = true;
-            }
-            if (params.containsKey("rid")) {
-                params.put("rid", sp.getRid());
-                changed = true;
-            }
-            if (params.containsKey("gid")) {
-                params.put("gid", sp.getGid());
-                changed = true;
-            }
-
+            if (params.containsKey("mac")) { params.put("mac", sp.getMac()); changed = true; }
+            if (params.containsKey("rid")) { params.put("rid", sp.getRid()); changed = true; }
+            if (params.containsKey("gid")) { params.put("gid", sp.getGid()); changed = true; }
             if (!changed) return postData;
 
-            // Re-encode
             StringBuilder sb = new StringBuilder();
             for (Map.Entry<String, String> e : params.entrySet()) {
                 if (sb.length() > 0) sb.append('&');
@@ -166,7 +144,6 @@ public class WebViewManager {
             Log.d("WebViewManager", "applyDeviceSpoof: injected mac/rid/gid into POST body");
             AppLogger.log("WebViewManager", "applyDeviceSpoof: device identifiers replaced");
             return modified;
-
         } catch (Exception e) {
             Log.e("WebViewManager",
                 "applyDeviceSpoof: failed to parse POST body — using original: " + e.getMessage());
@@ -179,15 +156,9 @@ public class WebViewManager {
     // -----------------------------------------------------------------------
 
     /**
-     * Opens a Google OAuth URL in Chrome via {@link Intent#ACTION_VIEW}.
-     *
-     * <p>This is called exclusively from {@link WebViewClientImpl#shouldOverrideUrlLoading}
-     * (and the equivalent popup WebViewClient) when the in-app WebView navigates to
-     * {@code accounts.google.com}. At that point the URL already contains Ubisoft's
-     * valid {@code state} and session tokens — Chrome follows the full OAuth chain
-     * and the final {@code grow://} redirect is handled by {@link Main#handleIntent}.
-     *
-     * <p>Guards against double-launch with {@link #sChromeLaunched}.
+     * Opens a Google OAuth URL in Chrome. Called exclusively from
+     * {@link WebViewClientImpl#interceptUrl} and the popup WebViewClient when
+     * the in-app WebView navigates to {@code accounts.google.com}.
      */
     static void launchGoogleLoginUrl(Activity activity, String url) {
         if (sChromeLaunched) {
@@ -203,10 +174,8 @@ public class WebViewManager {
             activity.startActivity(intent);
         } catch (android.content.ActivityNotFoundException e) {
             sChromeLaunched = false;
-            Log.e("WebViewManager",
-                "launchGoogleLoginUrl: no browser found: " + e.getMessage());
-            AppLogger.warn("WebViewManager",
-                "launchGoogleLoginUrl: ActivityNotFoundException");
+            Log.e("WebViewManager", "launchGoogleLoginUrl: no browser found: " + e.getMessage());
+            AppLogger.warn("WebViewManager", "launchGoogleLoginUrl: ActivityNotFoundException");
         }
     }
 
@@ -241,11 +210,24 @@ public class WebViewManager {
     // WebView lifecycle
     // -----------------------------------------------------------------------
 
+    /**
+     * Creates (if needed) and makes the login WebView visible.
+     *
+     * <p>The WebView is attached via {@link Activity#addContentView} so it
+     * lands in the window's DecorView hierarchy — above the game's GL surface
+     * and any native engine overlays. Without this, the engine's "Loading…"
+     * overlay covers the WebView and the account-selection buttons are never
+     * visible to the user.
+     *
+     * <p>Must be called on the main thread; returns silently otherwise.
+     */
     public synchronized void ShowWebView() {
         if (Looper.getMainLooper().getThread() != Thread.currentThread()) return;
+
         if (this.webView == null) {
             WebView wv = new WebView(this.baseActivity);
             this.webView = wv;
+
             wv.setWebViewClient(new WebViewClientImpl(this.baseActivity,
                 new WebViewCallbackListener() {
                     @Override public void OnError(int e) {
@@ -265,7 +247,6 @@ public class WebViewManager {
 
             wv.setBackgroundColor(0);
             wv.setScrollBarStyle(android.view.View.SCROLLBARS_INSIDE_OVERLAY);
-            wv.setLayoutParams(new RelativeLayout.LayoutParams(-1, -1));
             wv.addJavascriptInterface(new WebViewJavascriptInterface(this), "NativeApp");
 
             wv.setWebChromeClient(new WebChromeClient() {
@@ -277,7 +258,6 @@ public class WebViewManager {
                     AppLogger.log("WebViewManager", "onCreateWindow: creating popup WebView");
 
                     final WebView popup = new WebView(baseActivity);
-                    popup.setLayoutParams(new RelativeLayout.LayoutParams(-1, -1));
                     WebSettings ps = popup.getSettings();
                     ps.setJavaScriptEnabled(true);
                     ps.setDomStorageEnabled(true);
@@ -295,8 +275,7 @@ public class WebViewManager {
                         private boolean interceptPopupUrl(String url) {
                             if (url == null) return false;
                             if (url.contains("accounts.google.com")) {
-                                Log.d("WebViewManager",
-                                    "popup: Google OAuth → Chrome: " + url);
+                                Log.d("WebViewManager", "popup: Google OAuth → Chrome: " + url);
                                 AppLogger.log("WebViewManager",
                                     "popup: accounts.google.com → Chrome");
                                 baseActivity.runOnUiThread(() -> {
@@ -318,7 +297,11 @@ public class WebViewManager {
                         }
                     });
 
-                    ((SharedActivity) baseActivity).mViewGroup.addView(popup);
+                    // Popup also needs to be above the GL surface.
+                    RelativeLayout.LayoutParams pp =
+                        new RelativeLayout.LayoutParams(-1, -1);
+                    baseActivity.addContentView(popup, pp);
+
                     WebView.WebViewTransport t = (WebView.WebViewTransport) resultMsg.obj;
                     t.setWebView(popup);
                     resultMsg.sendToTarget();
@@ -326,11 +309,27 @@ public class WebViewManager {
                 }
             });
 
-            ((SharedActivity) this.baseActivity).mViewGroup.addView(wv);
+            // Attach at the DecorView level so it renders above the GL surface
+            // and the engine's native Loading overlay.
+            RelativeLayout.LayoutParams lp =
+                new RelativeLayout.LayoutParams(-1, -1);
+            this.baseActivity.addContentView(wv, lp);
+            Log.d("WebViewManager", "ShowWebView: WebView attached via addContentView");
+            AppLogger.log("WebViewManager", "ShowWebView: WebView created and attached");
         }
+
+        // Re-attach if the view was somehow removed from the hierarchy.
+        if (this.webView.getParent() == null) {
+            RelativeLayout.LayoutParams lp =
+                new RelativeLayout.LayoutParams(-1, -1);
+            this.baseActivity.addContentView(this.webView, lp);
+            Log.d("WebViewManager", "ShowWebView: WebView re-attached (was detached)");
+        }
+
         this.webView.setBackgroundColor(0);
         this.webView.setLayoutParams(new RelativeLayout.LayoutParams(-1, -1));
         this.webView.setVisibility(android.view.View.VISIBLE);
+        Log.d("WebViewManager", "ShowWebView: visibility set to VISIBLE");
     }
 
     private void closePopup(WebView popup) {
@@ -395,9 +394,6 @@ public class WebViewManager {
                     "LoadURLPost: showing login selection dialog in WebView");
                 Log.d("WebViewManager", "LoadURLPost: showing WebView — url=" + url);
 
-                // Inject spoofed device identifiers into the POST body before
-                // handing it to the WebView. Only fires on the Growtopia login
-                // dashboard; has no effect if the POST body lacks mac/rid/gid.
                 byte[] spoofedData = (url != null && url.contains("growtopia"))
                     ? applyDeviceSpoof(postData)
                     : postData;
@@ -410,6 +406,7 @@ public class WebViewManager {
     private void showAndPostUrl(String url, byte[] postData) {
         ShowWebView();
         originalURL = url;
+        Log.d("WebViewManager", "showAndPostUrl: calling postUrl — url=" + url);
         this.webView.postUrl(url, postData);
     }
 
@@ -491,14 +488,11 @@ public class WebViewManager {
         /**
          * Called by the Growtopia dashboard page's JavaScript when the user
          * selects a login method. For Google OAuth the page will subsequently
-         * navigate the WebView to {@code accounts.google.com}; that navigation
-         * is intercepted by {@link WebViewClientImpl#shouldOverrideUrlLoading},
-         * which sends the Google URL to Chrome and hides the WebView.
+         * navigate to {@code accounts.google.com}; that navigation is
+         * intercepted by {@link WebViewClientImpl#interceptUrl}, which sends
+         * the URL to Chrome and hides the WebView.
          *
-         * <p>Do NOT launch Chrome from here. The token received is the Ubisoft
-         * session/valKey token embedded in the page — it is NOT a Chrome-ready
-         * URL. Chrome must receive the full Google OAuth URL from
-         * shouldOverrideUrlLoading, not the raw dashboard URL.
+         * <p>Do NOT launch Chrome here.
          */
         @JavascriptInterface
         public void nativeSignIn(String token) {
@@ -511,9 +505,6 @@ public class WebViewManager {
             Log.d("JSInterface",
                 "nativeSignIn: token len=" + (token != null ? token.length() : 0)
                 + " — Chrome will be launched by shouldOverrideUrlLoading");
-            // No Chrome launch here. The dashboard page navigates to
-            // accounts.google.com after firing this JS call, and
-            // WebViewClientImpl.shouldOverrideUrlLoading intercepts that URL.
         }
 
         @JavascriptInterface
@@ -582,15 +573,14 @@ public class WebViewManager {
         private boolean interceptUrl(String url) {
             if (url == null) return false;
 
-            // The dashboard page navigates to accounts.google.com when the user
-            // taps "Continue with Google". This URL already contains Ubisoft's
-            // valid state and session tokens. Send it to Chrome — do NOT let the
-            // in-app WebView load it, and do NOT open the raw dashboard URL.
+            // Dashboard page navigates here when user taps "Continue with Google".
+            // This URL has Ubisoft's valid state/session tokens embedded — hand it
+            // to Chrome directly. Do NOT load it in the WebView.
             if (url.startsWith("https://accounts.google.com/")) {
                 Log.d("WebViewManager",
                     "shouldOverrideUrlLoading: Google OAuth URL → Chrome: " + url);
                 AppLogger.log("WebViewManager",
-                    "shouldOverrideUrlLoading: accounts.google.com intercepted — handing to Chrome");
+                    "shouldOverrideUrlLoading: accounts.google.com — handing to Chrome");
                 baseActivity.runOnUiThread(() -> {
                     WebViewManager.this.hideWebViewSync();
                     launchGoogleLoginUrl(baseActivity, url);
@@ -598,7 +588,6 @@ public class WebViewManager {
                 return true;
             }
 
-            // grow:// deep link from OAuth callback.
             return WebViewManager.this.handleGrowUrl(url);
         }
 
