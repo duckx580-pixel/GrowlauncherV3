@@ -18,6 +18,8 @@ import android.view.inputmethod.InputMethodManager;
 import com.rtsoft.growtopia.HeightProvider;
 import com.ubisoft.bridge.JavaInterface;
 
+import java.net.URLEncoder;
+
 public class Main extends SharedActivity {
     public static boolean OriginalKeyboard = false;
     public static boolean block_pause;
@@ -57,71 +59,31 @@ public class Main extends SharedActivity {
     public static WebViewManager GetWebViewManager() { return mainApp.webViewManager; }
 
     /**
-     * Dispatches a {@code grow://} URI to the game engine via
-     * {@link NativeAppInterface#OnDeepLinkProcess(String)}, mirroring real
-     * Growlauncher v5.57 exactly.
-     *
-     * <p>For the Google OAuth callback the URI is:
-     * {@code grow://login?token=SESSION_TOKEN[&info=...][&name=...]}
-     *
-     * <p>{@code uri.getSchemeSpecificPart()} for {@code grow://login?token=TOKEN}
-     * produces {@code //login?token=TOKEN}. libgrowtopia.so parses this string
-     * internally to extract the session token and complete the login — no further
-     * token extraction is needed on the Java side.
-     *
-     * <p>The call is posted to the GL render thread via {@code mGLView.post()},
-     * consistent with how libgrowtopia.so expects {@code OnDeepLinkProcess} to arrive.
-     *
-     * @param intent the incoming intent whose {@code getData()} is the {@code grow://} URI.
-     * @return {@code true} if dispatched; {@code false} if intent or URI data was null.
-     */
-    public static boolean HandleDeeplink(Intent intent) {
-        if (intent == null) return false;
-        final Uri data = intent.getData();
-        if (data == null) return false;
-        final String schemeSpecificPart = data.getSchemeSpecificPart();
-        Log.d("Main", "HandleDeeplink: scheme=" + data.getScheme()
-            + " host=" + data.getHost()
-            + " schemeSpecificPart=" + schemeSpecificPart);
-        AppLogger.log("Main", "HandleDeeplink: OnDeepLinkProcess — " + schemeSpecificPart);
-        // Post to the GL render thread — OnDeepLinkProcess is a JNI call that
-        // libgrowtopia.so expects on its own thread (same pattern as real GL v5.57).
-        SharedActivity.mGLView.post(() ->
-            NativeAppInterface.OnDeepLinkProcess(schemeSpecificPart));
-        return true;
-    }
-
-    /**
-     * Handles incoming {@code grow://} intents.
-     *
-     * <p>Called from {@link #onCreate} (launch intent) and {@link #onNewIntent}
-     * (Chrome returning after Google OAuth completes).
-     *
-     * <p>All {@code grow://} URIs — including the Google OAuth callback
-     * {@code grow://login?token=SESSION_TOKEN} — are forwarded to
-     * {@link #HandleDeeplink}, which posts them to the GL thread via
-     * {@link NativeAppInterface#OnDeepLinkProcess}.
-     *
-     * <p>No {@code nativeOnScriptCall("nativeSignIn", token)} is used.
-     * No WebView interaction is required. No {@code hideWebViewSync()} needed.
-     * This is the same dispatch path real Growlauncher v5.57 uses.
+     * Handles the grow:// OAuth redirect from Chrome.
+     * Forwards the redirect query parameters to libPowerKuy.so via
+     * notifyValueChanged(5, "google_redirect_callback", encoded) —
+     * mirroring Real Growlauncher v5.57 exactly.
      */
     private void handleIntent(Intent intent) {
         if (intent == null) return;
-        if (!"android.intent.action.VIEW".equals(intent.getAction())) return;
+        String action = intent.getAction();
         Uri data = intent.getData();
-        if (data == null) return;
-        String scheme = data.getScheme();
-        Log.d("Main", "handleIntent: scheme=" + scheme + " uri=" + data);
-        AppLogger.log("Main", "handleIntent: scheme=" + scheme);
-        if ("grow".equals(scheme)) {
-            // grow:// — covers the Google OAuth callback (grow://login?token=...)
-            // and all other Growtopia deep-links. Dispatch via HandleDeeplink so
-            // the engine receives uri.getSchemeSpecificPart() on the GL thread.
-            HandleDeeplink(intent);
+        if (!"android.intent.action.VIEW".equals(action) || data == null) {
+            return;
         }
-        // Other schemes (http, https, …) are not produced by the grow:// OAuth
-        // flow. Add handling below if other deep-link types are needed.
+        Log.d("Main", "handleIntent: uri=" + data);
+        AppLogger.log("Main", "handleIntent: grow:// redirect received");
+        try {
+            String info  = data.getQueryParameter("info");
+            String token = data.getQueryParameter("token");
+            String encoded =
+                "info="  + URLEncoder.encode(info  != null ? info  : "", "UTF-8") +
+                "&token=" + URLEncoder.encode(token != null ? token : "", "UTF-8");
+            launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
+                5, "google_redirect_callback", encoded);
+        } catch (Exception e) {
+            Log.e("Main", "Error handling redirect intent", e);
+        }
     }
 
     // Native methods in libzennkuy.so
@@ -255,6 +217,7 @@ public class Main extends SharedActivity {
         }
 
         JavaInterface.injectActivityJava(this);
+        com.ubisoft.bridge.a.a(this);
 
         this.zennKuyOverlay = new ZennKuyOverlay(this);
         this.zennKuyOverlay.attachTo(mViewGroup);
@@ -274,7 +237,6 @@ public class Main extends SharedActivity {
     @Override
     public void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        // Keep getIntent() current — some engine callbacks call getIntent() after onNewIntent.
         setIntent(intent);
         handleIntent(intent);
     }

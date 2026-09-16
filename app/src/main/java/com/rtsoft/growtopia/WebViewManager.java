@@ -21,6 +21,7 @@ import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 import java.io.File;
 import java.net.URLDecoder;
@@ -37,37 +38,6 @@ public class WebViewManager {
     private final ExecutorService webViewWorkExecutor;
     boolean allowExternalLinks = true;
     private WebView webView = null;
-
-    static volatile boolean sChromeLaunched = false;
-
-    /**
-     * Active Google OAuth client_id for Growtopia Android authentication.
-     * Used as the direct fallback when page JS capture yields nothing.
-     */
-    private static final String GOOGLE_CLIENT_ID =
-        "389994132396-ms0a9ckg28l58o92n33qj52v651152d1.apps.googleusercontent.com";
-
-    /**
-     * Redirect URI — Ubisoft's server-side Google callback endpoint.
-     * This is stable; it is not a client credential.
-     */
-    private static final String GOOGLE_REDIRECT_URI =
-        "https://login.growtopiagame.com/google/callback";
-
-    /**
-     * Captured at runtime from the page's inline JavaScript.
-     * The page carries the live client_id; we harvest it via JS injection
-     * rather than hardcoding it so Ubisoft credential rotations are
-     * handled automatically.
-     */
-    private volatile String capturedClientId  = null;
-
-    /**
-     * Captured at runtime if the page calls window.open or navigates
-     * location.href directly to accounts.google.com. When present this
-     * URL is used verbatim — the page already built it correctly.
-     */
-    private volatile String capturedOAuthUrl  = null;
 
     public boolean needed_to_render = false;
     public String to_render = "";
@@ -181,103 +151,6 @@ public class WebViewManager {
     }
 
     // -----------------------------------------------------------------------
-    // Google OAuth handoff
-    // -----------------------------------------------------------------------
-
-    /**
-     * Builds a Google OAuth URL and launches it in Chrome.
-     *
-     * @param state    the 576-char Ubisoft state token from nativeSignIn
-     * @param clientId the Google OAuth client_id (captured or hardcoded)
-     */
-    private void launchGoogleOAuth(String state, String clientId) {
-        if (sChromeLaunched) {
-            Log.d("WebViewManager", "launchGoogleOAuth: Chrome already launched — skipping");
-            return;
-        }
-        sChromeLaunched = true;
-
-        Uri oauthUri = Uri.parse("https://accounts.google.com/o/oauth2/v2/auth")
-            .buildUpon()
-            .appendQueryParameter("client_id",     clientId)
-            .appendQueryParameter("redirect_uri",  GOOGLE_REDIRECT_URI)
-            .appendQueryParameter("response_type", "code")
-            .appendQueryParameter("scope",         "openid profile email")
-            .appendQueryParameter("prompt",        "select_account")
-            .appendQueryParameter("state",         state)
-            .build();
-
-        Log.d("WebViewManager", "launchGoogleOAuth: URL — " + oauthUri);
-        AppLogger.log("WebViewManager",
-            "launchGoogleOAuth: launching Chrome (client_id=" + clientId + ")");
-        launchInChrome(oauthUri.toString());
-    }
-
-    /**
-     * Launches a fully-formed URL (Google OAuth or grow://) in Chrome.
-     * Called when the page gave us a complete URL via window.open hook.
-     */
-    static void launchGoogleLoginUrl(Activity activity, String url) {
-        if (sChromeLaunched) {
-            Log.d("WebViewManager", "launchGoogleLoginUrl: Chrome already launched — skipping");
-            return;
-        }
-        sChromeLaunched = true;
-        Log.d("WebViewManager", "launchGoogleLoginUrl: launching Chrome — " + url);
-        AppLogger.log("WebViewManager", "launchGoogleLoginUrl: launching Chrome");
-        launchInChromeStatic(activity, url);
-    }
-
-    private void launchInChrome(String url) {
-        launchInChromeStatic(baseActivity, url);
-    }
-
-    private static void launchInChromeStatic(Activity activity, String url) {
-        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        intent.setPackage("com.android.chrome");
-        try {
-            activity.startActivity(intent);
-        } catch (android.content.ActivityNotFoundException ignored) {
-            intent.setPackage(null);
-            try {
-                activity.startActivity(intent);
-            } catch (android.content.ActivityNotFoundException e2) {
-                sChromeLaunched = false;
-                Log.e("WebViewManager", "launchInChrome: no browser available: " + e2.getMessage());
-                AppLogger.warn("WebViewManager", "launchInChrome: no browser");
-            }
-        }
-    }
-
-    boolean handleGrowUrl(String url) {
-        if (url == null || !url.startsWith("grow://")) return false;
-        AppLogger.log("WebView", "grow:// intercepted — url=" + url);
-        Log.d("WebView", "grow:// intercepted — url=" + url);
-        try {
-            Uri uri = Uri.parse(url);
-            String token = uri.getQueryParameter("token");
-            if (token == null || token.isEmpty()) token = uri.getQueryParameter("info");
-            if (token != null && !token.isEmpty()) {
-                final String safeToken = token;
-                ZennKuyBridge.sTokenDelivered = true;
-                baseActivity.runOnUiThread(() -> {
-                    AppLogger.log("WebView",
-                        "grow:// delivering token (len=" + safeToken.length() + ")");
-                    this.hideWebViewSync();
-                    WebViewManager.this.nativeOnScriptCall("nativeSignIn", safeToken);
-                    WebViewManager.this.HideWebView();
-                });
-            } else {
-                AppLogger.warn("WebView", "grow:// had no token — url=" + url);
-            }
-        } catch (Exception e) {
-            Log.e("WebView", "grow:// intercept error: " + e);
-        }
-        return true;
-    }
-
-    // -----------------------------------------------------------------------
     // WebView lifecycle
     // -----------------------------------------------------------------------
 
@@ -314,47 +187,13 @@ public class WebViewManager {
                 public boolean onCreateWindow(WebView view, boolean isDialog,
                                               boolean isUserGesture,
                                               android.os.Message resultMsg) {
-                    Log.d("WebViewManager", "onCreateWindow: popup requested");
-                    final WebView popup = new WebView(baseActivity);
-                    WebSettings ps = popup.getSettings();
-                    ps.setJavaScriptEnabled(true);
-                    ps.setDomStorageEnabled(true);
-                    popup.setWebViewClient(new WebViewClient() {
-                        @Override
-                        public boolean shouldOverrideUrlLoading(
-                                WebView v, WebResourceRequest req) {
-                            return interceptPopupUrl(req.getUrl().toString());
-                        }
-                        @Override @SuppressWarnings("deprecation")
-                        public boolean shouldOverrideUrlLoading(WebView v, String url) {
-                            return interceptPopupUrl(url);
-                        }
-                        private boolean interceptPopupUrl(String url) {
-                            if (url == null) return false;
-                            if (url.contains("accounts.google.com")) {
-                                baseActivity.runOnUiThread(() -> {
-                                    closePopup(popup);
-                                    launchGoogleLoginUrl(baseActivity, url);
-                                });
-                                return true;
-                            }
-                            if (handleGrowUrl(url)) {
-                                baseActivity.runOnUiThread(() -> closePopup(popup));
-                                return true;
-                            }
-                            return false;
-                        }
-                    });
-                    popup.setWebChromeClient(new WebChromeClient() {
-                        @Override public void onCloseWindow(WebView w) {
-                            baseActivity.runOnUiThread(() -> closePopup(w));
-                        }
-                    });
-                    FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT);
-                    baseActivity.addContentView(popup, pp);
+                    Log.d("WebViewManager", "onCreateWindow: popup requested — delegating to libPowerKuy");
+                    // libPowerKuy.so owns the OAuth window; acknowledge the
+                    // popup request without intercepting so the native layer
+                    // controls the flow.
                     WebView.WebViewTransport t = (WebView.WebViewTransport) resultMsg.obj;
+                    WebView popup = new WebView(baseActivity);
+                    popup.getSettings().setJavaScriptEnabled(true);
                     t.setWebView(popup);
                     resultMsg.sendToTarget();
                     return true;
@@ -384,14 +223,6 @@ public class WebViewManager {
         Log.d("WebViewManager", "ShowWebView: visibility VISIBLE");
     }
 
-    private void closePopup(WebView popup) {
-        if (popup == null) return;
-        ViewGroup parent = (ViewGroup) popup.getParent();
-        if (parent != null) parent.removeView(popup);
-        popup.stopLoading();
-        popup.destroy();
-    }
-
     public void LoadURL(final String url, final boolean allowExternal) {
         this.webViewWorkExecutor.execute(() ->
             this.baseActivity.runOnUiThread(() -> {
@@ -412,10 +243,6 @@ public class WebViewManager {
                 if (postData != null) {
                     this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
                 }
-
-                // Reset captured OAuth values for this new login session.
-                this.capturedClientId = null;
-                this.capturedOAuthUrl = null;
 
                 LoginSpoof spoof = getActiveSpoof();
                 if (spoof != null) {
@@ -440,7 +267,6 @@ public class WebViewManager {
                 }
 
                 ZennKuyBridge.sTokenDelivered = false;
-                sChromeLaunched = false;
                 ClearCookieWebData();
                 AppLogger.log("WebViewManager", "LoadURLPost: showing login dialog in WebView");
                 Log.d("WebViewManager", "LoadURLPost: showing WebView — url=" + url);
@@ -533,94 +359,17 @@ public class WebViewManager {
         WebViewJavascriptInterface(WebViewManager wvm) { this.webviewManager = wvm; }
 
         /**
-         * Invoked by JS hook when the page calls window.open() or sets
-         * location.href with an accounts.google.com URL.
-         * Stores the URL so nativeSignIn can use it directly.
+         * Called by the Growtopia dashboard when the user taps "Continue with Google".
+         * Mirrors Real Growlauncher v5.57 exactly: hide the WebView, then signal
+         * libPowerKuy.so to own the entire OAuth browser flow.
          */
         @JavascriptInterface
-        public void captureFullOAuthUrl(String url) {
-            if (url == null || url.isEmpty()) return;
-            Log.d("JSInterface", "captureFullOAuthUrl: captured — " + url);
-            AppLogger.log("JSInterface", "captureFullOAuthUrl: page-built OAuth URL captured");
-            WebViewManager.this.capturedOAuthUrl = url;
-        }
-
-        /**
-         * Invoked by JS hook when a client_id pattern is found in inline
-         * scripts. Stores it so nativeSignIn can build the OAuth URL.
-         */
-        @JavascriptInterface
-        public void captureGoogleClientId(String clientId) {
-            if (clientId == null || clientId.isEmpty()) return;
-            Log.d("JSInterface", "captureGoogleClientId: captured — " + clientId);
-            AppLogger.log("JSInterface",
-                "captureGoogleClientId: client_id from page = " + clientId);
-            WebViewManager.this.capturedClientId = clientId;
-        }
-
-        /**
-         * Called by the Growtopia dashboard when the user taps a login
-         * button. {@code token} is Ubisoft's session {@code state} parameter
-         * (~576 chars). We use it as the {@code state} in the Google OAuth URL.
-         *
-         * <p>Priority order:
-         * <ol>
-         *   <li>capturedOAuthUrl — page built it, use verbatim</li>
-         *   <li>capturedClientId — from inline JS scan, build URL from it</li>
-         *   <li>GOOGLE_CLIENT_ID — known-active hardcoded fallback</li>
-         * </ol>
-         */
-        @JavascriptInterface
-        public void nativeSignIn(String token) {
-            ZennKuyBridge.sTokenDelivered = false;
-            sChromeLaunched = false;
-
-            Log.d("JSInterface", "nativeSignIn: state token len="
-                + (token != null ? token.length() : "null")
-                + " token=[" + token + "]");
-            AppLogger.log("JSInterface",
-                "nativeSignIn: Ubisoft state received (len="
-                + (token != null ? token.length() : "null") + ")");
-
-            if (token == null || token.isEmpty()) {
-                Log.e("JSInterface", "nativeSignIn: empty state token");
-                AppLogger.warn("JSInterface", "nativeSignIn: empty token");
-                return;
-            }
-
-            final String state = token;
-            WebViewManager.this.baseActivity.runOnUiThread(() -> {
-                WebViewManager.this.hideWebViewSync();
-
-                // Priority 1: page handed us a fully-formed OAuth URL.
-                String fullUrl = WebViewManager.this.capturedOAuthUrl;
-                if (fullUrl != null && fullUrl.contains("accounts.google.com")) {
-                    Log.d("JSInterface",
-                        "nativeSignIn: using captured OAuth URL from page");
-                    AppLogger.log("JSInterface",
-                        "nativeSignIn: launching Chrome with page-built URL");
-                    launchGoogleLoginUrl(WebViewManager.this.baseActivity, fullUrl);
-                    return;
-                }
-
-                // Priority 2: captured client_id from inline JS.
-                String clientId = WebViewManager.this.capturedClientId;
-                if (clientId != null && !clientId.isEmpty()) {
-                    Log.d("JSInterface",
-                        "nativeSignIn: building OAuth URL with captured client_id=" + clientId);
-                    AppLogger.log("JSInterface",
-                        "nativeSignIn: building OAuth URL (client_id=" + clientId + ")");
-                    WebViewManager.this.launchGoogleOAuth(state, clientId);
-                    return;
-                }
-
-                // Priority 3: use known-active hardcoded client_id.
-                Log.d("JSInterface",
-                    "nativeSignIn: no capture from page — using hardcoded client_id fallback");
-                AppLogger.log("JSInterface",
-                    "nativeSignIn: launching Chrome with hardcoded client_id");
-                WebViewManager.this.launchGoogleOAuth(state, GOOGLE_CLIENT_ID);
-            });
+        public void nativeSignIn(String str) {
+            Toast.makeText(SharedActivity.app, "Logging in with google... wait a moment...", Toast.LENGTH_SHORT).show();
+            Log.d("JavaScriptInterface", "nativeSignIn called! Token: " + str);
+            this.webviewManager.HideWebView();
+            launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
+                0, "google_login_btn", Boolean.TRUE);
         }
 
         @JavascriptInterface
@@ -647,18 +396,6 @@ public class WebViewManager {
                 WebViewManager.this.baseActivity.startActivity(
                     new Intent(Intent.ACTION_VIEW, Uri.parse(url))));
         }
-
-        @JavascriptInterface
-        public void openAsResult(final String url) {
-            Log.d("JSInterface", "openAsResult: url=" + url);
-            ZennKuyBridge.sTokenDelivered = false;
-            sChromeLaunched = false;
-            WebViewManager.this.baseActivity.runOnUiThread(() -> {
-                WebViewManager.this.hideWebViewSync();
-                launchGoogleLoginUrl(WebViewManager.this.baseActivity, url);
-                WebViewManager.this.HideWebView();
-            });
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -669,45 +406,14 @@ public class WebViewManager {
         private final Activity baseActivity;
         private final WebViewCallbackListener listener;
 
-        // JS to inject after page load:
-        //   1. anchor-tag _blank handler (original)
-        //   2. window.open hook → captureFullOAuthUrl
-        //   3. Location.prototype.href hook → captureFullOAuthUrl
-        //   4. inline-script scan for client_id pattern → captureGoogleClientId
-        //   5. <a href=accounts.google.com> scan → captureFullOAuthUrl
+        // Inject the anchor _blank handler so external links open in the browser.
         private static final String HOOK_JS =
             "(function(){"+
-            // ---- 1. anchor _blank handler (original) ----
             "var _a=document.getElementsByTagName('a');"+
             "for(var _v of _a){_v.addEventListener('click',function(e){"+
             "if(e.currentTarget.target=='_blank'){"+
             "e.preventDefault();NativeApp.openInBrowser(e.currentTarget.href);"+
-            "return false;}});} "+
-            // ---- 2. window.open hook ----
-            "var _o=window.open;"+
-            "window.open=function(u,n,f){"+
-            "if(u&&u.indexOf('accounts.google.com')>=0){"+
-            "try{NativeApp.captureFullOAuthUrl(u);}catch(e){}"+
-            "return{closed:false,close:function(){}};"+
-            "}return _o?_o.apply(this,arguments):null;};"+
-            // ---- 3. Location.prototype.href setter hook ----
-            "try{var _d=Object.getOwnPropertyDescriptor(Location.prototype,'href');"+
-            "if(_d&&_d.set){var _s=_d.set;"+
-            "Object.defineProperty(Location.prototype,'href',{"+
-            "set:function(u){"+
-            "if(u&&u.indexOf('accounts.google.com')>=0){"+
-            "try{NativeApp.captureFullOAuthUrl(u);}catch(e){}return;}"+
-            "_s.call(this,u);},"+
-            "get:_d.get,configurable:true});}}catch(e){} "+
-            // ---- 4. Scan inline scripts for client_id ----
-            "try{var _t='';"+
-            "document.querySelectorAll('script').forEach(function(s){_t+=s.innerText||'';});"+
-            "var _m=_t.match(/([0-9]+-[a-z0-9]+\\.apps\\.googleusercontent\\.com)/);"+
-            "if(_m)NativeApp.captureGoogleClientId(_m[1]);}catch(e){} "+
-            // ---- 5. Scan <a> tags ----
-            "try{document.querySelectorAll('a[href*=\"accounts.google.com\"]')"+
-            ".forEach(function(a){try{NativeApp.captureFullOAuthUrl(a.href);}catch(e){}});"+
-            "}catch(e){}"+
+            "return false;}});}" +
             "})();";
 
         WebViewClientImpl(Activity a, WebViewCallbackListener l) {
@@ -717,32 +423,16 @@ public class WebViewManager {
 
         @Override
         public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
-            return interceptUrl(req.getUrl().toString());
+            return false;
         }
 
         @Override @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView v, String url) {
-            return interceptUrl(url);
-        }
-
-        /** Safety net — in case a page variant navigates the WebView directly. */
-        private boolean interceptUrl(String url) {
-            if (url == null) return false;
-            if (url.startsWith("https://accounts.google.com/")) {
-                Log.d("WebViewManager",
-                    "shouldOverrideUrlLoading: Google OAuth URL → Chrome (safety net): " + url);
-                baseActivity.runOnUiThread(() -> {
-                    WebViewManager.this.hideWebViewSync();
-                    launchGoogleLoginUrl(baseActivity, url);
-                });
-                return true;
-            }
-            return WebViewManager.this.handleGrowUrl(url);
+            return false;
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            // Single loadUrl call with all hooks combined.
             view.loadUrl("javascript:" + HOOK_JS);
             this.listener.OnPageLoaded(url);
         }
