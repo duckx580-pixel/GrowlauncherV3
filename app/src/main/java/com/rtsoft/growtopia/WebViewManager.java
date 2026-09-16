@@ -469,12 +469,19 @@ public class WebViewManager {
             }
 
             // ── Non-empty token: OAuth completed, deliver to game engine ──────────────
+            // Must deliver on the UI thread — nativeOnScriptCall is a JNI call into
+            // libgrowtopia.so and the game engine only processes it from the UI/GL thread.
+            // The JS interface callback runs on a background thread; calling nativeOnScriptCall
+            // directly from here silently fails (same reason handleGrowUrl wraps in runOnUiThread).
+            final String safeToken = token;
             ZennKuyBridge.sTokenDelivered = true;
-            android.widget.Toast.makeText(
-                    Main.mainApp, "Logging in with google... wait a moment...",
-                    android.widget.Toast.LENGTH_SHORT).show();
-            this.webviewManager.HideWebView();
-            this.webviewManager.nativeOnScriptCall("nativeSignIn", token);
+            WebViewManager.this.baseActivity.runOnUiThread(() -> {
+                android.widget.Toast.makeText(
+                        Main.mainApp, "Logging in with google... wait a moment...",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                WebViewManager.this.HideWebView();
+                WebViewManager.this.nativeOnScriptCall("nativeSignIn", safeToken);
+            });
         }
 
         @JavascriptInterface
