@@ -40,9 +40,9 @@ public class WebViewManager {
 
     static volatile boolean sChromeLaunched = false;
 
-    // Google OAuth constants — same values the Growtopia dashboard uses.
+    // Google OAuth constants — real web client ID from Growtopia's strings.xml.
     private static final String GOOGLE_CLIENT_ID =
-        "389994132396-4s6ol46f60831v5e839e5llqvdv0g005.apps.googleusercontent.com";
+        "588841715802-is413qb7l33h13g0cqv0imi8bk87pmv7.apps.googleusercontent.com";
     private static final String GOOGLE_REDIRECT_URI =
         "https://login.growtopiagame.com/google/callback";
 
