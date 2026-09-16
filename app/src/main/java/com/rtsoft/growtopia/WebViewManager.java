@@ -23,7 +23,12 @@ import android.webkit.WebViewClient;
 import android.widget.RelativeLayout;
 
 import java.io.File;
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -101,6 +106,76 @@ public class WebViewManager {
             wv.stopLoading();
             wv.loadUrl("about:blank");
             wv.setVisibility(android.view.View.GONE);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Device spoof injection
+    // -----------------------------------------------------------------------
+
+    /**
+     * Parses a URL-encoded form body, replaces the known Growtopia device
+     * identifier parameters (mac, rid, gid) with the spoofed values stored
+     * by {@link DeviceSpoofer}, and returns the modified bytes.
+     *
+     * <p>Only called when the target URL is the Growtopia login dashboard.
+     * If parsing fails for any reason the original bytes are returned
+     * unchanged so the login still proceeds.
+     */
+    private byte[] applyDeviceSpoof(byte[] postData) {
+        if (postData == null || postData.length == 0) return postData;
+        try {
+            DeviceSpoofer sp = new DeviceSpoofer(baseActivity);
+            String body = new String(postData, StandardCharsets.ISO_8859_1);
+
+            // Parse into an ordered map to preserve unknown parameters.
+            Map<String, String> params = new LinkedHashMap<>();
+            for (String pair : body.split("&")) {
+                int eq = pair.indexOf('=');
+                if (eq < 0) { params.put(pair, ""); continue; }
+                String key = URLDecoder.decode(pair.substring(0, eq), "UTF-8");
+                String val = URLDecoder.decode(pair.substring(eq + 1),  "UTF-8");
+                params.put(key, val);
+            }
+
+            boolean changed = false;
+            if (params.containsKey("mac")) {
+                params.put("mac", sp.getMac());
+                changed = true;
+            }
+            if (params.containsKey("rid")) {
+                params.put("rid", sp.getRid());
+                changed = true;
+            }
+            if (params.containsKey("gid")) {
+                params.put("gid", sp.getGid());
+                changed = true;
+            }
+            // Also handle alternate casing / abbreviations used by older GT builds
+            if (params.containsKey("wk")) {
+                // wk is typically a device token — leave untouched unless
+                // the spoofer gains explicit support for it.
+            }
+
+            if (!changed) return postData; // nothing to replace
+
+            // Re-encode
+            StringBuilder sb = new StringBuilder();
+            for (Map.Entry<String, String> e : params.entrySet()) {
+                if (sb.length() > 0) sb.append('&');
+                sb.append(URLEncoder.encode(e.getKey(),   "UTF-8"));
+                sb.append('=');
+                sb.append(URLEncoder.encode(e.getValue(), "UTF-8"));
+            }
+            byte[] modified = sb.toString().getBytes(StandardCharsets.ISO_8859_1);
+            Log.d("WebViewManager", "applyDeviceSpoof: injected mac/rid/gid into POST body");
+            AppLogger.log("WebViewManager", "applyDeviceSpoof: device identifiers replaced");
+            return modified;
+
+        } catch (Exception e) {
+            Log.e("WebViewManager",
+                "applyDeviceSpoof: failed to parse POST body — using original: " + e.getMessage());
+            return postData;
         }
     }
 
@@ -334,7 +409,15 @@ public class WebViewManager {
                 AppLogger.log("WebViewManager",
                     "LoadURLPost: showing login selection dialog in WebView");
                 Log.d("WebViewManager", "LoadURLPost: showing WebView — url=" + url);
-                showAndPostUrl(url, postData);
+
+                // Inject spoofed device identifiers into the POST body before
+                // handing it to the WebView. Only fires on the Growtopia login
+                // dashboard; has no effect if the POST body lacks mac/rid/gid.
+                byte[] spoofedData = (url != null && url.contains("growtopia"))
+                    ? applyDeviceSpoof(postData)
+                    : postData;
+
+                showAndPostUrl(url, spoofedData);
             })
         );
     }

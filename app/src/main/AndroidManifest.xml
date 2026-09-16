@@ -70,6 +70,15 @@
             android:hardwareAccelerated="true"
             android:theme="@style/Theme.Growlauncher" />
 
+        <!-- Settings screen -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:hardwareAccelerated="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Growlauncher"
+            android:windowSoftInputMode="adjustResize" />
+
         <activity
             android:name="com.rtsoft.growtopia.Main"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation|fontScale|uiMode|touchscreen"
