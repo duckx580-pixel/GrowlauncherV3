@@ -30,7 +30,7 @@ class LauncherActivity : AppCompatActivity() {
 
         binding.launchButton.setOnClickListener { launchGrowtopia() }
         binding.settingsButton.setOnClickListener {
-            startActivity(Intent(this, PermissionActivity::class.java))
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
         binding.scriptHubButton.setOnClickListener { comingSoon(R.string.menu_script_hub) }
         binding.myScriptButton.setOnClickListener { comingSoon(R.string.menu_my_script) }
