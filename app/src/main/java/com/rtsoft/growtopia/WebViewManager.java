@@ -22,16 +22,10 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.RelativeLayout;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class WebViewManager {
     private static String originalURL;
@@ -111,156 +105,30 @@ public class WebViewManager {
     }
 
     // -----------------------------------------------------------------------
-    // Dashboard fetch + redirect chain
+    // Google login launch
     // -----------------------------------------------------------------------
 
     /**
-     * Opens a single {@link HttpURLConnection} to {@code targetUrl} without
-     * following redirects.
-     */
-    private static HttpURLConnection openGet(String targetUrl) throws Exception {
-        URL url = new URL(targetUrl);
-        HttpURLConnection c = (HttpURLConnection) url.openConnection();
-        c.setRequestMethod("GET");
-        c.setConnectTimeout(10_000);
-        c.setReadTimeout(10_000);
-        c.setInstanceFollowRedirects(false);
-        c.setRequestProperty("User-Agent",
-            "Mozilla/5.0 (Linux; Android 11; SDK 30) AppleWebKit/537.36 "
-            + "(KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36");
-        c.setRequestProperty("Accept",
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-        return c;
-    }
-
-    /** Reads the full body of an open connection as UTF-8. */
-    private static String readBody(HttpURLConnection c) throws Exception {
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader r = new BufferedReader(
-                new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = r.readLine()) != null) sb.append(line).append('\n');
-        }
-        return sb.toString();
-    }
-
-    /** Regex-extracts the first {@code accounts.google.com/o/oauth2/...} URL. */
-    private static String extractGoogleUrl(String html) {
-        Matcher m = Pattern.compile(
-            "(https://accounts\\.google\\.com/o/oauth2/[^\"'\\s<>\\\\]+)"
-        ).matcher(html);
-        if (!m.find()) return null;
-        return m.group(1).replace("&amp;", "&");
-    }
-
-    /**
-     * Fetches the Ubisoft login dashboard (stored as {@link #last_url} with
-     * its session {@code ?valKey=...}) on a background thread.
+     * Launches Chrome with the raw dashboard URL (stored as {@link #last_url}
+     * including the session {@code ?valKey=...}) so Chrome handles all
+     * redirects and cookies natively.
      *
-     * <p><b>Redirect chain — one hop only:</b>
-     * <pre>
-     *   GET  last_url  (valKey URL — single-use, consumed here)
-     *     └ 302 Location = loc1  (validate URL — also single-use)
-     *         → hand loc1 to Chrome immediately; Chrome follows the rest
-     * </pre>
-     *
-     * <p>We intentionally do NOT perform a hop2 GET on loc1.
-     * The validate JWT is single-use: consuming it in Java leaves a dead
-     * URL for Chrome and causes "Please try login again."
-     * Chrome receives loc1 fresh and follows validate → Google OAuth itself.
+     * <p>No Java HTTP fetching is performed. Any Java GET of the valKey URL
+     * consumes the token without the WebView session cookies, leaving Chrome
+     * with a dead session. Chrome must be the first and only consumer.
      */
-    private void fetchDashboardAndLaunchGoogle(Activity activity) {
-        final String dashboardUrl = this.last_url;
-
-        new Thread(() -> {
-            HttpURLConnection c1 = null;
-            try {
-                // ---- Hop 1: valKey dashboard URL ----
-                Log.d("WebViewManager", "fetchDashboard hop1: GET " + dashboardUrl);
-                AppLogger.log("WebViewManager", "fetchDashboard: hop1 GET dashboard (valKey)");
-                c1 = openGet(dashboardUrl);
-                int code1 = c1.getResponseCode();
-                Log.d("WebViewManager", "fetchDashboard hop1: HTTP " + code1);
-
-                if (code1 >= 300 && code1 < 400) {
-                    String loc1 = c1.getHeaderField("Location");
-                    Log.d("WebViewManager", "fetchDashboard hop1: redirect Location=" + loc1);
-                    c1.disconnect(); c1 = null;
-
-                    if (loc1 == null || loc1.isEmpty()) {
-                        Log.e("WebViewManager",
-                            "fetchDashboard hop1: 3xx with no Location — opening dashboardUrl");
-                        openUrlFallback(activity, dashboardUrl);
-                        return;
-                    }
-
-                    // loc1 is either the validate URL or a direct Google redirect.
-                    // Hand it to Chrome NOW — do NOT GET it in Java.
-                    // Chrome follows the remaining redirect chain itself.
-                    Log.d("WebViewManager",
-                        "fetchDashboard hop1: handing Location to Chrome: " + loc1);
-                    AppLogger.log("WebViewManager",
-                        "fetchDashboard: hop1 redirect — opening Location in Chrome");
-                    final String targetUrl = loc1;
-                    activity.runOnUiThread(() -> launchGoogleLoginUrl(activity, targetUrl));
-                    return;
-                }
-
-                if (code1 == 200) {
-                    String html = readBody(c1);
-                    Log.d("WebViewManager",
-                        "fetchDashboard hop1: 200 body length=" + html.length());
-                    String gUrl = extractGoogleUrl(html);
-                    if (gUrl != null) {
-                        Log.d("WebViewManager",
-                            "fetchDashboard hop1: extracted Google URL=" + gUrl);
-                        final String finalUrl = gUrl;
-                        activity.runOnUiThread(
-                            () -> launchGoogleLoginUrl(activity, finalUrl));
-                    } else {
-                        String preview = html.length() > 500
-                            ? html.substring(0, 500) : html;
-                        Log.e("WebViewManager",
-                            "fetchDashboard hop1: no Google URL in 200. Preview:\n" + preview);
-                        openUrlFallback(activity, dashboardUrl);
-                    }
-                    return;
-                }
-
-                Log.e("WebViewManager",
-                    "fetchDashboard hop1: HTTP " + code1 + " — fallback");
-                openUrlFallback(activity, dashboardUrl);
-
-            } catch (Exception e) {
-                Log.e("WebViewManager",
-                    "fetchDashboard: exception — " + e.getMessage(), e);
-                AppLogger.warn("WebViewManager",
-                    "fetchDashboard: exception: " + e.getMessage());
-                openUrlFallback(activity, dashboardUrl);
-            } finally {
-                if (c1 != null) c1.disconnect();
-            }
-        }, "DashboardFetch").start();
-    }
-
-    /**
-     * Last-resort fallback: opens {@code url} in Chrome so the user can
-     * proceed manually instead of hanging indefinitely.
-     */
-    private static void openUrlFallback(Activity activity, String url) {
-        Log.d("WebViewManager", "fetchDashboard: fallback — opening in Chrome: " + url);
-        AppLogger.log("WebViewManager", "fetchDashboard: fallback — opening URL in Chrome");
-        activity.runOnUiThread(() -> launchGoogleLoginUrl(activity, url));
-    }
-
     void launchGoogleLogin(Activity activity) {
         Log.d("WebViewManager",
-            "launchGoogleLogin: starting dashboard fetch (" + this.last_url + ")");
+            "launchGoogleLogin: opening dashboard URL in Chrome — " + this.last_url);
         AppLogger.log("WebViewManager",
-            "launchGoogleLogin: starting dashboard fetch for Google OAuth");
-        fetchDashboardAndLaunchGoogle(activity);
+            "launchGoogleLogin: launching Chrome with raw dashboard URL (valKey)");
+        launchGoogleLoginUrl(activity, this.last_url);
     }
 
+    /**
+     * Opens {@code url} in Chrome via {@link Intent#ACTION_VIEW}.
+     * Guards against double-launch with {@link #sChromeLaunched}.
+     */
     static void launchGoogleLoginUrl(Activity activity, String url) {
         if (sChromeLaunched) {
             Log.d("WebViewManager",
@@ -560,7 +428,7 @@ public class WebViewManager {
             AppLogger.log("JSInterface",
                 "nativeSignIn fired — token len="
                 + (token != null ? token.length() : "null")
-                + " — clearing state, fetching dashboard, launching Chrome");
+                + " — hiding WebView, launching Chrome with dashboard URL");
             Log.d("JSInterface",
                 "nativeSignIn: cleared flags; token len="
                 + (token != null ? token.length() : 0));
