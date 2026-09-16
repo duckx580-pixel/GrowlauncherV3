@@ -20,7 +20,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.RelativeLayout;
+import android.widget.FrameLayout;
 
 import java.io.File;
 import java.net.URLDecoder;
@@ -214,10 +214,13 @@ public class WebViewManager {
      * Creates (if needed) and makes the login WebView visible.
      *
      * <p>The WebView is attached via {@link Activity#addContentView} so it
-     * lands in the window's DecorView hierarchy — above the game's GL surface
-     * and any native engine overlays. Without this, the engine's "Loading…"
-     * overlay covers the WebView and the account-selection buttons are never
-     * visible to the user.
+     * lands in the window's content FrameLayout ({@code android.R.id.content}),
+     * above the game's GL surface and any native engine overlays.
+     *
+     * <p>{@link android.widget.FrameLayout.LayoutParams} is required here:
+     * {@code android.R.id.content} is a {@code FrameLayout}, and passing
+     * {@code RelativeLayout.LayoutParams} causes a {@link ClassCastException}
+     * in {@code FrameLayout.onMeasure} on every layout pass.
      *
      * <p>Must be called on the main thread; returns silently otherwise.
      */
@@ -297,9 +300,11 @@ public class WebViewManager {
                         }
                     });
 
-                    // Popup also needs to be above the GL surface.
-                    RelativeLayout.LayoutParams pp =
-                        new RelativeLayout.LayoutParams(-1, -1);
+                    // Popup also needs FrameLayout.LayoutParams — same parent type.
+                    FrameLayout.LayoutParams pp =
+                        new FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT);
                     baseActivity.addContentView(popup, pp);
 
                     WebView.WebViewTransport t = (WebView.WebViewTransport) resultMsg.obj;
@@ -309,10 +314,11 @@ public class WebViewManager {
                 }
             });
 
-            // Attach at the DecorView level so it renders above the GL surface
-            // and the engine's native Loading overlay.
-            RelativeLayout.LayoutParams lp =
-                new RelativeLayout.LayoutParams(-1, -1);
+            // android.R.id.content is a FrameLayout — must use FrameLayout.LayoutParams.
+            FrameLayout.LayoutParams lp =
+                new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT);
             this.baseActivity.addContentView(wv, lp);
             Log.d("WebViewManager", "ShowWebView: WebView attached via addContentView");
             AppLogger.log("WebViewManager", "ShowWebView: WebView created and attached");
@@ -320,14 +326,18 @@ public class WebViewManager {
 
         // Re-attach if the view was somehow removed from the hierarchy.
         if (this.webView.getParent() == null) {
-            RelativeLayout.LayoutParams lp =
-                new RelativeLayout.LayoutParams(-1, -1);
+            FrameLayout.LayoutParams lp =
+                new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT);
             this.baseActivity.addContentView(this.webView, lp);
             Log.d("WebViewManager", "ShowWebView: WebView re-attached (was detached)");
         }
 
         this.webView.setBackgroundColor(0);
-        this.webView.setLayoutParams(new RelativeLayout.LayoutParams(-1, -1));
+        this.webView.setLayoutParams(new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT));
         this.webView.setVisibility(android.view.View.VISIBLE);
         Log.d("WebViewManager", "ShowWebView: visibility set to VISIBLE");
     }
@@ -423,8 +433,10 @@ public class WebViewManager {
             this.baseActivity.runOnUiThread(() -> {
                 WebView wv = this.webView;
                 if (wv == null) return;
-                RelativeLayout.LayoutParams lp =
-                    new RelativeLayout.LayoutParams((int) w, (int) h);
+                // FrameLayout.LayoutParams extends ViewGroup.MarginLayoutParams
+                // so setMargins() works exactly as before.
+                FrameLayout.LayoutParams lp =
+                    new FrameLayout.LayoutParams((int) w, (int) h);
                 lp.setMargins((int) x, (int) y, 0, 0);
                 wv.setLayoutParams(lp);
             })
