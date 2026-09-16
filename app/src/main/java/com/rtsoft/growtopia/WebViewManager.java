@@ -151,13 +151,8 @@ public class WebViewManager {
                 params.put("gid", sp.getGid());
                 changed = true;
             }
-            // Also handle alternate casing / abbreviations used by older GT builds
-            if (params.containsKey("wk")) {
-                // wk is typically a device token — leave untouched unless
-                // the spoofer gains explicit support for it.
-            }
 
-            if (!changed) return postData; // nothing to replace
+            if (!changed) return postData;
 
             // Re-encode
             StringBuilder sb = new StringBuilder();
@@ -180,40 +175,28 @@ public class WebViewManager {
     }
 
     // -----------------------------------------------------------------------
-    // Google login launch
+    // Google OAuth handoff
     // -----------------------------------------------------------------------
 
     /**
-     * Launches Chrome with the raw dashboard URL (stored as {@link #last_url}
-     * including the session {@code ?valKey=...}) so Chrome handles all
-     * redirects and cookies natively.
+     * Opens a Google OAuth URL in Chrome via {@link Intent#ACTION_VIEW}.
      *
-     * <p>No Java HTTP fetching is performed. Any Java GET of the valKey URL
-     * consumes the token without the WebView session cookies, leaving Chrome
-     * with a dead session. Chrome must be the first and only consumer.
-     */
-    void launchGoogleLogin(Activity activity) {
-        Log.d("WebViewManager",
-            "launchGoogleLogin: opening dashboard URL in Chrome — " + this.last_url);
-        AppLogger.log("WebViewManager",
-            "launchGoogleLogin: launching Chrome with raw dashboard URL (valKey)");
-        launchGoogleLoginUrl(activity, this.last_url);
-    }
-
-    /**
-     * Opens {@code url} in Chrome via {@link Intent#ACTION_VIEW}.
-     * Guards against double-launch with {@link #sChromeLaunched}.
+     * <p>This is called exclusively from {@link WebViewClientImpl#shouldOverrideUrlLoading}
+     * (and the equivalent popup WebViewClient) when the in-app WebView navigates to
+     * {@code accounts.google.com}. At that point the URL already contains Ubisoft's
+     * valid {@code state} and session tokens — Chrome follows the full OAuth chain
+     * and the final {@code grow://} redirect is handled by {@link Main#handleIntent}.
+     *
+     * <p>Guards against double-launch with {@link #sChromeLaunched}.
      */
     static void launchGoogleLoginUrl(Activity activity, String url) {
         if (sChromeLaunched) {
-            Log.d("WebViewManager",
-                "launchGoogleLoginUrl: Chrome already launched — skipping");
+            Log.d("WebViewManager", "launchGoogleLoginUrl: Chrome already launched — skipping");
             return;
         }
         sChromeLaunched = true;
-        Log.d("WebViewManager", "launchGoogleLoginUrl: opening Chrome — url=" + url);
-        AppLogger.log("WebViewManager",
-            "launchGoogleLoginUrl: launching Chrome for Google OAuth");
+        Log.d("WebViewManager", "launchGoogleLoginUrl: sending Google OAuth URL to Chrome — " + url);
+        AppLogger.log("WebViewManager", "launchGoogleLoginUrl: launching Chrome for Google OAuth");
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
@@ -314,6 +297,8 @@ public class WebViewManager {
                             if (url.contains("accounts.google.com")) {
                                 Log.d("WebViewManager",
                                     "popup: Google OAuth → Chrome: " + url);
+                                AppLogger.log("WebViewManager",
+                                    "popup: accounts.google.com → Chrome");
                                 baseActivity.runOnUiThread(() -> {
                                     closePopup(popup);
                                     launchGoogleLoginUrl(baseActivity, url);
@@ -503,29 +488,32 @@ public class WebViewManager {
         WebViewManager webviewManager;
         WebViewJavascriptInterface(WebViewManager wvm) { this.webviewManager = wvm; }
 
+        /**
+         * Called by the Growtopia dashboard page's JavaScript when the user
+         * selects a login method. For Google OAuth the page will subsequently
+         * navigate the WebView to {@code accounts.google.com}; that navigation
+         * is intercepted by {@link WebViewClientImpl#shouldOverrideUrlLoading},
+         * which sends the Google URL to Chrome and hides the WebView.
+         *
+         * <p>Do NOT launch Chrome from here. The token received is the Ubisoft
+         * session/valKey token embedded in the page — it is NOT a Chrome-ready
+         * URL. Chrome must receive the full Google OAuth URL from
+         * shouldOverrideUrlLoading, not the raw dashboard URL.
+         */
         @JavascriptInterface
         public void nativeSignIn(String token) {
             ZennKuyBridge.sTokenDelivered = false;
             sChromeLaunched = false;
-
             AppLogger.log("JSInterface",
-                "nativeSignIn fired — token len="
+                "nativeSignIn: login method selected — token len="
                 + (token != null ? token.length() : "null")
-                + " — hiding WebView, launching Chrome with dashboard URL");
+                + " — awaiting shouldOverrideUrlLoading for accounts.google.com");
             Log.d("JSInterface",
-                "nativeSignIn: cleared flags; token len="
-                + (token != null ? token.length() : 0));
-
-            WebViewManager.this.baseActivity.runOnUiThread(() -> {
-                WebViewManager.this.hideWebViewSync();
-                android.widget.Toast.makeText(
-                    Main.mainApp,
-                    "Opening Google sign-in...",
-                    android.widget.Toast.LENGTH_SHORT).show();
-                WebViewManager.this.launchGoogleLogin(
-                    WebViewManager.this.baseActivity);
-                WebViewManager.this.HideWebView();
-            });
+                "nativeSignIn: token len=" + (token != null ? token.length() : 0)
+                + " — Chrome will be launched by shouldOverrideUrlLoading");
+            // No Chrome launch here. The dashboard page navigates to
+            // accounts.google.com after firing this JS call, and
+            // WebViewClientImpl.shouldOverrideUrlLoading intercepts that URL.
         }
 
         @JavascriptInterface
@@ -583,10 +571,34 @@ public class WebViewManager {
 
         @Override
         public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
-            return WebViewManager.this.handleGrowUrl(req.getUrl().toString());
+            return interceptUrl(req.getUrl().toString());
         }
+
         @Override @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView v, String url) {
+            return interceptUrl(url);
+        }
+
+        private boolean interceptUrl(String url) {
+            if (url == null) return false;
+
+            // The dashboard page navigates to accounts.google.com when the user
+            // taps "Continue with Google". This URL already contains Ubisoft's
+            // valid state and session tokens. Send it to Chrome — do NOT let the
+            // in-app WebView load it, and do NOT open the raw dashboard URL.
+            if (url.startsWith("https://accounts.google.com/")) {
+                Log.d("WebViewManager",
+                    "shouldOverrideUrlLoading: Google OAuth URL → Chrome: " + url);
+                AppLogger.log("WebViewManager",
+                    "shouldOverrideUrlLoading: accounts.google.com intercepted — handing to Chrome");
+                baseActivity.runOnUiThread(() -> {
+                    WebViewManager.this.hideWebViewSync();
+                    launchGoogleLoginUrl(baseActivity, url);
+                });
+                return true;
+            }
+
+            // grow:// deep link from OAuth callback.
             return WebViewManager.this.handleGrowUrl(url);
         }
 
