@@ -169,6 +169,17 @@ public final class ZennKuyBridge {
         }
     }
 
+    /**
+     * Loads the Growtopia login dashboard as a fallback when startResolving() determines
+     * no WebView or spoof path is active.
+     *
+     * <p>Uses {@link WebViewManager#LoadURLPost} with the POST data the game engine
+     * originally sent (stored in {@code wvm.last_url} / {@code wvm.last_packet}) so the
+     * server receives the same device fingerprint it expects.  Falls back to a plain GET
+     * via {@link WebViewManager#LoadURL} only if no POST data is available — for example
+     * when startResolving() is called from the mod menu before the engine has ever issued
+     * a LoadURLPost for the login flow.
+     */
     private static void triggerWebViewLogin() {
         Main.mainApp.runOnUiThread(() -> {
             try {
@@ -177,9 +188,27 @@ public final class ZennKuyBridge {
                     Log.e(TAG, "triggerWebViewLogin: webViewManager is null");
                     return;
                 }
-                AppLogger.log(TAG, "triggerWebViewLogin: loading Growtopia dashboard URL");
-                Log.d(TAG, "triggerWebViewLogin: loading dashboard URL");
-                wvm.LoadURL(DASHBOARD_URL, false);
+
+                String storedUrl    = wvm.last_url;
+                String storedPacket = wvm.last_packet;
+
+                if (storedUrl != null && !storedUrl.isEmpty()
+                        && storedPacket != null && !storedPacket.isEmpty()) {
+                    // Re-issue the original LoadURLPost so the page receives the same
+                    // POST body (device fingerprint, valKey, etc.) the engine sent.
+                    // This is the path Real Growlauncher v5.57 always takes.
+                    AppLogger.log(TAG, "triggerWebViewLogin: replaying stored LoadURLPost — url=" + storedUrl);
+                    Log.d(TAG, "triggerWebViewLogin: LoadURLPost (stored data) — url=" + storedUrl);
+                    byte[] postData = storedPacket.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+                    wvm.LoadURLPost(storedUrl, postData, false);
+                } else {
+                    // No stored POST data — fall back to GET.  The dashboard page still
+                    // renders and the NativeApp.nativeSignIn JS bridge still fires, but
+                    // the server may not personalise the session without the POST body.
+                    AppLogger.log(TAG, "triggerWebViewLogin: no stored POST data — GET fallback — url=" + DASHBOARD_URL);
+                    Log.d(TAG, "triggerWebViewLogin: LoadURL GET fallback — url=" + DASHBOARD_URL);
+                    wvm.LoadURL(DASHBOARD_URL, false);
+                }
             } catch (Exception e) {
                 Log.e(TAG, "triggerWebViewLogin: " + e.getMessage());
             }

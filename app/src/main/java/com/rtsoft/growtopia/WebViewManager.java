@@ -46,6 +46,18 @@ public class WebViewManager {
     private static final String GOOGLE_LOGIN_URL =
             "https://login.growtopiagame.com/player/login/google?valKey=40db4045f2d8c572efe8c4a060605726";
 
+    /**
+     * Set to {@code true} the moment Chrome is first launched for Google OAuth in this
+     * auth session.  Guards {@code openAsResult()} against double-opening Chrome when
+     * {@code nativeSignIn("")} already launched it — two concurrent Chrome intents for
+     * different OAuth URLs collide as same Android task and the second one is dropped.
+     *
+     * <p>Reset to {@code false} at the start of every new auth session
+     * ({@link #LoadURLPost} no-spoof path, same place {@link ZennKuyBridge#sTokenDelivered}
+     * is reset).
+     */
+    static volatile boolean sChromeLaunched = false;
+
     private interface WebViewCallbackListener {
         void OnError(int errorCode);
         void OnPageLoaded(String url);
@@ -245,6 +257,9 @@ public class WebViewManager {
                 }
 
                 // No spoof — new auth session starting.
+                // Reset Chrome-launch guard so openAsResult() can fire if the page calls it
+                // before nativeSignIn("") in this new session.
+                sChromeLaunched = false;
                 // Clear cookies NOW (before showing WebView) so stale Growtopia
                 // session data from a previous attempt cannot interfere with the
                 // fresh OAuth flow.  Clearing here (not in HideWebView/DestroyWebView)
@@ -346,31 +361,47 @@ public class WebViewManager {
 
             if (token == null || token.isEmpty()) {
                 // Login page calls nativeSignIn("") to trigger Google sign-in.
-                // Cannot use Android SDK (Error 10 on debug-signed APK).
+                // Cannot use Android SDK account picker — causes Error 10 / DEVELOPER_ERROR
+                // on debug-signed APKs because debug SHA-1 is not registered with Google.
                 //
-                // Open Chrome with the /google endpoint DIRECTLY.
-                // This bypasses the dashboard page entirely — the dashboard page
-                // calls NativeApp.nativeSignIn("") on button click, but Chrome has
-                // no NativeApp JS bridge → undefined → button silently fails → stuck.
-                //
-                // The /google endpoint initiates OAuth without any NativeApp call.
-                // Chrome follows: Growtopia /google → Google OAuth → grow:// redirect
+                // Strategy: open Chrome with the /google endpoint directly.
+                // Chrome → Growtopia /google → Google OAuth → user picks account
+                // → Google → Growtopia OAuth callback → grow:// redirect
                 // → Android → onNewIntent → handleIntent → nativeOnScriptCall → logged in.
                 //
-                // Using startActivity (NOT startActivityForResult) — Chrome opens as
-                // a separate task and immediately returns RESULT_CANCELED, which would
-                // trigger onActivityResult → handleSignInResult → SDK failure path
-                // → second Cancel dialog in-game (the Cancel #2 bug).
-                Log.d("JSInterface", "nativeSignIn: empty token — opening Chrome with Google login URL");
-                AppLogger.log("JSInterface", "nativeSignIn: empty token — launching Chrome for Google OAuth via /google endpoint");
+                // sChromeLaunched flag prevents openAsResult() from double-opening Chrome
+                // if the page also calls NativeApp.openAsResult(url) after nativeSignIn("").
+                // Two concurrent startActivity(ACTION_VIEW) intents for different URLs
+                // get collapsed into the same Chrome task and the second URL is dropped.
+                //
+                // startActivity (NOT startActivityForResult) — Chrome returns RESULT_CANCELED
+                // immediately as a separate task; startActivityForResult would route that
+                // through onActivityResult → handleSignInResult → SDK failure → Cancel #2 bug.
+                Log.d("JSInterface", "nativeSignIn: empty token — launching Chrome for Google OAuth");
+                AppLogger.log("JSInterface", "nativeSignIn: empty token — Chrome OAuth path via /google endpoint");
                 WebViewManager.this.baseActivity.runOnUiThread(() -> {
+                    if (sChromeLaunched) {
+                        Log.d("JSInterface", "nativeSignIn: Chrome already launched — skipping duplicate open");
+                        return;
+                    }
+                    sChromeLaunched = true;
+                    android.widget.Toast.makeText(
+                            Main.mainApp,
+                            "Opening Google sign-in...",
+                            android.widget.Toast.LENGTH_SHORT).show();
                     // Hide WebView before Chrome opens so the game surface is
                     // visible while the user completes Google sign-in in Chrome.
                     WebViewManager.this.HideWebView();
-                    Intent intent = new Intent(Intent.ACTION_VIEW,
-                            Uri.parse(GOOGLE_LOGIN_URL));
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    WebViewManager.this.baseActivity.startActivity(intent);
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_VIEW,
+                                Uri.parse(GOOGLE_LOGIN_URL));
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        WebViewManager.this.baseActivity.startActivity(intent);
+                        Log.d("JSInterface", "nativeSignIn: Chrome intent sent — url=" + GOOGLE_LOGIN_URL);
+                    } catch (Exception e) {
+                        Log.e("JSInterface", "nativeSignIn: failed to launch Chrome: " + e);
+                        sChromeLaunched = false; // reset so retry can try again
+                    }
                 });
                 return;
             }
@@ -416,20 +447,42 @@ public class WebViewManager {
         /**
          * Called by Growtopia's login page JS: NativeApp.openAsResult(googleOAuthUrl)
          *
-         * Launches Chrome with the Google OAuth URL. Uses startActivity
-         * (NOT startActivityForResult) — Chrome opens as a separate task and
-         * immediately returns RESULT_CANCELED, which would trigger onActivityResult
-         * → handleSignInResult → SDK failure path → second Cancel dialog (Cancel #2).
+         * <p>If {@link #sChromeLaunched} is already true, {@code nativeSignIn("")} already
+         * opened Chrome this session and we must NOT fire a second intent — two concurrent
+         * ACTION_VIEW intents collapse into the same Chrome task and the second URL is
+         * silently dropped, breaking the OAuth flow.
+         *
+         * <p>Uses startActivity (NOT startActivityForResult) to avoid the Cancel #2 bug:
+         * Chrome opens as a separate task and immediately returns RESULT_CANCELED;
+         * startActivityForResult would route that through onActivityResult →
+         * handleSignInResult → SDK failure path → second Cancel dialog in-game.
          * The grow:// redirect routes back via onNewIntent → handleIntent instead.
          */
         @JavascriptInterface
         public void openAsResult(final String url) {
-            Log.d("JSInterface", "openAsResult: launching Chrome for Google OAuth — url=" + url);
-            AppLogger.log("JSInterface", "openAsResult: starting Chrome with Google OAuth URL");
+            Log.d("JSInterface", "openAsResult called — url=" + url);
+            if (sChromeLaunched) {
+                // nativeSignIn("") already opened Chrome. If openAsResult fires after it,
+                // the URL from the page is likely more accurate (it's the actual OAuth URL
+                // the server built), but opening a second Chrome activity for a different URL
+                // gets dropped by Android's task management. Safe to skip.
+                AppLogger.log("JSInterface", "openAsResult: Chrome already launched by nativeSignIn — skipping duplicate open");
+                Log.d("JSInterface", "openAsResult: sChromeLaunched=true — skipping to prevent double-open");
+                return;
+            }
+            AppLogger.log("JSInterface", "openAsResult: launching Chrome — url=" + url);
             WebViewManager.this.baseActivity.runOnUiThread(() -> {
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                WebViewManager.this.baseActivity.startActivity(intent);
+                if (sChromeLaunched) return; // double-check on UI thread
+                sChromeLaunched = true;
+                try {
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    WebViewManager.this.baseActivity.startActivity(intent);
+                    Log.d("JSInterface", "openAsResult: Chrome intent sent — url=" + url);
+                } catch (Exception e) {
+                    Log.e("JSInterface", "openAsResult: failed to launch Chrome: " + e);
+                    sChromeLaunched = false;
+                }
             });
         }
     }
@@ -480,11 +533,15 @@ public class WebViewManager {
                 AppLogger.log("WebView", "interceptUrl: accounts.google.com intercepted — redirecting to Chrome");
                 WebViewManager.this.baseActivity.runOnUiThread(() -> {
                     try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        WebViewManager.this.baseActivity.startActivity(intent);
+                        if (!sChromeLaunched) {
+                            sChromeLaunched = true;
+                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            WebViewManager.this.baseActivity.startActivity(intent);
+                        }
                     } catch (Exception e) {
                         Log.e("WebView", "Failed to open Google OAuth in Chrome: " + e);
+                        sChromeLaunched = false;
                     }
                 });
                 return true;
