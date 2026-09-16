@@ -22,9 +22,15 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.RelativeLayout;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class WebViewManager {
     private static String originalURL;
@@ -32,45 +38,6 @@ public class WebViewManager {
     private final ExecutorService webViewWorkExecutor;
     boolean allowExternalLinks = true;
     private WebView webView = null;
-
-    // OAuth2 constants — never concatenate these manually; always use buildGoogleOAuthUri().
-    private static final String GOOGLE_CLIENT_ID =
-        "389994132396-4s6ol46f60831v5blfpci7lnmsdnh8br.apps.googleusercontent.com";
-    private static final String GOOGLE_REDIRECT_URI =
-        "https://login.growtopiagame.com/google/callback";
-
-    /**
-     * Builds the standard Google OAuth 2.0 authorization URL using {@link Uri.Builder}
-     * so every parameter is percent-encoded automatically.
-     *
-     * <p>Endpoint: {@code https://accounts.google.com/o/oauth2/v2/auth}
-     * (the public, stable OAuth2 endpoint — not {@code /v3/signin/accountchooser},
-     * which requires server-generated {@code dsh}/{@code continue}/{@code state}
-     * parameters and returns HTTP 400 when those are absent).
-     *
-     * <p>Redirect chain after the user picks an account in Chrome:
-     * <ol>
-     *   <li>Google → {@code login.growtopiagame.com/google/callback?code=...}</li>
-     *   <li>Server exchanges the code for a session token</li>
-     *   <li>Server issues HTTP 302 → {@code grow://login?token=SESSION_TOKEN}</li>
-     *   <li>Android routes {@code grow://} → {@link Main#onNewIntent} via the
-     *       {@code <intent-filter>} declared in AndroidManifest.xml</li>
-     *   <li>{@code handleIntent} → {@link Main#HandleDeeplink} →
-     *       {@code NativeAppInterface.OnDeepLinkProcess(schemeSpecificPart)}</li>
-     * </ol>
-     */
-    private static Uri buildGoogleOAuthUri() {
-        return new Uri.Builder()
-            .scheme("https")
-            .authority("accounts.google.com")
-            .path("/o/oauth2/v2/auth")
-            .appendQueryParameter("client_id", GOOGLE_CLIENT_ID)
-            .appendQueryParameter("redirect_uri", GOOGLE_REDIRECT_URI)
-            .appendQueryParameter("response_type", "code")
-            .appendQueryParameter("scope", "openid profile email")
-            .appendQueryParameter("prompt", "select_account")
-            .build();
-    }
 
     /**
      * Set to {@code true} before calling {@link #launchGoogleLoginUrl} to prevent
@@ -155,14 +122,106 @@ public class WebViewManager {
     }
 
     /**
-     * Launches the system browser (Chrome) with the Google OAuth2 URL built by
-     * {@link #buildGoogleOAuthUri()}.  Guards against double-launch with
-     * {@link #sChromeLaunched}.
+     * Fetches the Ubisoft login dashboard endpoint on a background thread, extracts
+     * the server-generated Google OAuth URL (which contains the valid encrypted
+     * {@code state} parameter), then opens that URL in Chrome.
+     *
+     * <p>Endpoint: {@code GET https://login.growtopiagame.com/player/login/dashboard}
+     *
+     * <p>The response HTML contains an {@code <a>} or redirect pointing to
+     * {@code https://accounts.google.com/o/oauth2/...} with Ubisoft's server-signed
+     * {@code state}.  Constructing the URL manually (any approach using
+     * {@code Uri.Builder} or a hardcoded {@code state}) will be rejected by
+     * Ubisoft's {@code /google/callback} endpoint — only the server-generated URL works.
+     *
+     * <p>On parse failure the method logs the error and takes no further action.
+     * There is no manual-URL fallback because that path is confirmed broken.
+     */
+    private static void fetchDashboardAndLaunchGoogle(Activity activity) {
+        new Thread(() -> {
+            HttpURLConnection conn = null;
+            try {
+                Log.d("WebViewManager", "fetchDashboard: GET https://login.growtopiagame.com/player/login/dashboard");
+                AppLogger.log("WebViewManager", "fetchDashboard: fetching Ubisoft dashboard for Google OAuth URL");
+
+                URL endpoint = new URL("https://login.growtopiagame.com/player/login/dashboard");
+                conn = (HttpURLConnection) endpoint.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(10_000);
+                conn.setReadTimeout(10_000);
+                conn.setInstanceFollowRedirects(true);
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 11; SDK 30) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36");
+                conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+
+                int responseCode = conn.getResponseCode();
+                Log.d("WebViewManager", "fetchDashboard: HTTP " + responseCode);
+
+                if (responseCode < 200 || responseCode >= 400) {
+                    Log.e("WebViewManager", "fetchDashboard: unexpected HTTP " + responseCode);
+                    AppLogger.warn("WebViewManager", "fetchDashboard: HTTP error " + responseCode);
+                    return;
+                }
+
+                // Read the full response body
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line).append('\n');
+                    }
+                }
+
+                String html = sb.toString();
+                Log.d("WebViewManager", "fetchDashboard: response length=" + html.length());
+
+                // Extract the server-generated Google OAuth URL.
+                // The dashboard HTML contains a link/redirect to accounts.google.com/o/oauth2/
+                // with Ubisoft's encrypted state parameter already embedded.
+                Pattern pattern = Pattern.compile(
+                    "(https://accounts\\.google\\.com/o/oauth2/[^\"'\\s<>\\\\]+)");
+                Matcher matcher = pattern.matcher(html);
+
+                if (!matcher.find()) {
+                    Log.e("WebViewManager", "fetchDashboard: no Google OAuth URL found in response");
+                    AppLogger.warn("WebViewManager", "fetchDashboard: failed to parse Google OAuth URL from dashboard HTML");
+                    return;
+                }
+
+                String googleOAuthUrl = matcher.group(1);
+
+                // Unescape HTML entities that the HTML parser would normally handle
+                googleOAuthUrl = googleOAuthUrl.replace("&amp;", "&");
+
+                Log.d("WebViewManager", "fetchDashboard: extracted Google OAuth URL=" + googleOAuthUrl);
+                AppLogger.log("WebViewManager", "fetchDashboard: launching Chrome with server-generated Google OAuth URL");
+
+                final String finalUrl = googleOAuthUrl;
+                activity.runOnUiThread(() -> launchGoogleLoginUrl(activity, finalUrl));
+
+            } catch (Exception e) {
+                Log.e("WebViewManager", "fetchDashboard: exception — " + e.getMessage(), e);
+                AppLogger.warn("WebViewManager", "fetchDashboard: exception: " + e.getMessage());
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+        }, "DashboardFetch").start();
+    }
+
+    /**
+     * Starts the Google OAuth flow by fetching the server-generated OAuth URL from
+     * Ubisoft's login dashboard, then opening it in Chrome.
+     *
+     * <p>The dashboard provides the {@code state} parameter encrypted by Ubisoft's server.
+     * Without it, {@code /google/callback} rejects the response with
+     * "Oops, too many people trying to login at once."
      */
     static void launchGoogleLogin(Activity activity) {
-        String url = buildGoogleOAuthUri().toString();
-        Log.d("WebViewManager", "launchGoogleLogin: built OAuth2 URL=" + url);
-        launchGoogleLoginUrl(activity, url);
+        Log.d("WebViewManager", "launchGoogleLogin: fetching server-generated URL from Ubisoft dashboard");
+        AppLogger.log("WebViewManager", "launchGoogleLogin: starting dashboard fetch for Google OAuth");
+        fetchDashboardAndLaunchGoogle(activity);
     }
 
     /**
@@ -284,9 +343,8 @@ public class WebViewManager {
                         private boolean interceptPopupUrl(String url) {
                             if (url == null) return false;
 
-                            // Popup navigated to accounts.google.com — the server generated
-                            // this URL with a valid state parameter.  Use it directly
-                            // instead of our built URL so state validation passes.
+                            // Popup navigated to accounts.google.com — this URL was generated
+                            // by the page JS and already contains the valid server state.
                             if (url.contains("accounts.google.com")) {
                                 Log.d("WebViewManager", "popup: intercepting Google OAuth URL → Chrome: " + url);
                                 AppLogger.log("WebViewManager", "popup: redirecting Google OAuth to Chrome");
@@ -490,10 +548,11 @@ public class WebViewManager {
         /**
          * Called by the Growtopia login page JS: {@code NativeApp.nativeSignIn(token)}
          *
-         * <p><b>Always launches Chrome.</b> Whether the page calls this with an
-         * empty string (user explicitly tapped "Continue with Google") or with a
-         * cached token (page auto-plays a previous session), the correct action is
-         * the same: clear all stale state and open Chrome with a fresh OAuth2 URL.
+         * <p><b>Always launches Chrome via dashboard fetch.</b> Whether the page calls
+         * this with an empty string (user explicitly tapped "Continue with Google") or
+         * with a cached token (page auto-plays a previous session), the correct action
+         * is the same: clear all stale state and open Chrome with the server-generated
+         * OAuth URL fetched from the Ubisoft dashboard.
          *
          * <p>Real session tokens ONLY arrive via:
          * {@code grow://} → {@link Main#onNewIntent} → {@link Main#HandleDeeplink}
@@ -508,7 +567,7 @@ public class WebViewManager {
 
             AppLogger.log("JSInterface",
                 "nativeSignIn fired — token len=" + (token != null ? token.length() : "null")
-                + " — force-clearing stale state, launching Chrome");
+                + " — force-clearing stale state, fetching dashboard URL, launching Chrome");
             Log.d("JSInterface",
                 "nativeSignIn: cleared sTokenDelivered + sChromeLaunched; token len="
                 + (token != null ? token.length() : 0));
@@ -596,7 +655,7 @@ public class WebViewManager {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()");
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
             this.listener.OnPageLoaded(url);
         }
 
