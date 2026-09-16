@@ -90,7 +90,7 @@ public class ZennKuyOverlay {
         card.setOrientation(LinearLayout.VERTICAL);
         card.setBackground(roundedRect(C_BG, C_BORDER, 1, 16));
 
-        // ── Header bar ──────────────────────────────────────────────────
+        // ── Header bar ───────────────────────────────────────────────────────────────────
         LinearLayout header = row();
         header.setPadding(dp(16), dp(14), dp(12), dp(14));
         TextView badge = label("ZK");
@@ -110,7 +110,7 @@ public class ZennKuyOverlay {
         card.addView(header);
         card.addView(divider());
 
-        // ── Body ─────────────────────────────────────────────────────────
+        // ── Body ──────────────────────────────────────────────────────────────────────
         ScrollView scroll = new ScrollView(ctx);
         LinearLayout root = new LinearLayout(ctx);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -154,7 +154,7 @@ public class ZennKuyOverlay {
         root.addView(wkRow);
         root.addView(spacer(14));
 
-        TextView hint = label("Tap Start Resolving → pick your Google account\n→ the game will log in automatically.");
+        TextView hint = label("Tap Start Resolving → Chrome opens Growtopia login\n→ sign in with Google → game logs in automatically.");
         hint.setTextColor(C_ACCENT);
         hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         root.addView(hint);
@@ -172,7 +172,7 @@ public class ZennKuyOverlay {
         root.addView(resolveBtn);
         root.addView(spacer(10));
 
-        // ── Debug log viewer ─────────────────────────────────────────────
+        // ── Debug log viewer ────────────────────────────────────────────────────────────────────
         LinearLayout logRow = row();
         Button logsBtn = smallBtn("VIEW LOGS");
         logsBtn.setOnClickListener(v -> showLogs());
@@ -251,21 +251,27 @@ public class ZennKuyOverlay {
         b.show();
     }
 
+    /**
+     * Initiates Google login via the WebView → Chrome → grow:// redirect flow.
+     *
+     * <p>Delegates entirely to {@link ZennKuyBridge#startResolving()} which handles:
+     * <ol>
+     *   <li>Short-circuit if token already delivered this session ({@code sTokenDelivered})</li>
+     *   <li>Inject saved ltoken / refresh-token spoof if enabled</li>
+     *   <li>Skip if WebView OAuth flow is already running</li>
+     *   <li>Fallback: load Growtopia dashboard URL in WebView</li>
+     * </ol>
+     *
+     * <p><b>Do NOT call {@code googleSignInHelper.SignIn()} here.</b> That launches
+     * the native Google SDK account picker which fails with Error 10 (DEVELOPER_ERROR)
+     * on debug-signed APKs because the debug keystore SHA-1 is not registered in
+     * Firebase — and V3 cannot register it without breaking the stock build.
+     */
     private void startResolving() {
-        try {
-            Main app = (Main) ctx;
-            GoogleSignInHelper helper = app.googleSignInHelper;
-            if (helper != null) {
-                helper.SignIn();
-            } else {
-                Toast.makeText(ctx, "GoogleSignInHelper not ready", Toast.LENGTH_SHORT).show();
-            }
-        } catch (Exception e) {
-            Toast.makeText(ctx, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-        }
+        ZennKuyBridge.startResolving();
     }
 
-    // ── Styled building blocks ──────────────────────────────────────────────
+    // ── Styled building blocks ────────────────────────────────────────────────────────────────────
 
     private TextView label(String text) {
         TextView tv = new TextView(ctx);
