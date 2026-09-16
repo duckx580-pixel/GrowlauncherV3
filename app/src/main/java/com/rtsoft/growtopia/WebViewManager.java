@@ -122,50 +122,89 @@ public class WebViewManager {
     }
 
     /**
-     * Fetches the Ubisoft login dashboard endpoint on a background thread, extracts
-     * the server-generated Google OAuth URL (which contains the valid encrypted
-     * {@code state} parameter), then opens that URL in Chrome.
+     * Fetches the Ubisoft dashboard URL (stored as {@link #last_url} by
+     * {@link #LoadURLPost}, including the session {@code ?valKey=...} query parameter)
+     * on a background thread, extracts the server-generated Google OAuth URL, then
+     * opens it in Chrome.
      *
-     * <p>Endpoint: {@code GET https://login.growtopiagame.com/player/login/dashboard}
+     * <p>Three resolution paths, tried in order:
+     * <ol>
+     *   <li><b>Direct redirect</b>: server responds with 3xx and a {@code Location}
+     *       header pointing to {@code accounts.google.com} — grab the URL immediately.
+     *   <li><b>HTML body</b>: server responds with 200 HTML — regex-extract the first
+     *       {@code https://accounts.google.com/o/oauth2/...} URL.
+     *   <li><b>Fallback</b>: open the valKey dashboard URL directly in Chrome so the
+     *       user can tap Google manually, rather than hanging indefinitely.
+     * </ol>
      *
-     * <p>The response HTML contains an {@code <a>} or redirect pointing to
-     * {@code https://accounts.google.com/o/oauth2/...} with Ubisoft's server-signed
-     * {@code state}.  Constructing the URL manually (any approach using
-     * {@code Uri.Builder} or a hardcoded {@code state}) will be rejected by
-     * Ubisoft's {@code /google/callback} endpoint — only the server-generated URL works.
-     *
-     * <p>On parse failure the method logs the error and takes no further action.
-     * There is no manual-URL fallback because that path is confirmed broken.
+     * <p>On parse failure, logs the first 500 characters of the response body to
+     * help diagnose what Ubisoft actually returned.
      */
-    private static void fetchDashboardAndLaunchGoogle(Activity activity) {
+    private void fetchDashboardAndLaunchGoogle(Activity activity) {
+        // Capture last_url on the calling thread; it holds the full dashboard URL
+        // including the server-generated ?valKey= query parameter set by LoadURLPost.
+        // Without valKey, Ubisoft's server does not render the Google OAuth button.
+        final String dashboardUrl = this.last_url;
+
         new Thread(() -> {
             HttpURLConnection conn = null;
             try {
-                Log.d("WebViewManager", "fetchDashboard: GET https://login.growtopiagame.com/player/login/dashboard");
+                Log.d("WebViewManager", "fetchDashboard: GET " + dashboardUrl);
                 AppLogger.log("WebViewManager", "fetchDashboard: fetching Ubisoft dashboard for Google OAuth URL");
 
-                URL endpoint = new URL("https://login.growtopiagame.com/player/login/dashboard");
+                URL endpoint = new URL(dashboardUrl);
                 conn = (HttpURLConnection) endpoint.openConnection();
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(10_000);
                 conn.setReadTimeout(10_000);
-                conn.setInstanceFollowRedirects(true);
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 11; SDK 30) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36");
-                conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+                // Do NOT follow redirects automatically — we need to inspect the
+                // Location header on 3xx to detect a direct Google OAuth redirect.
+                conn.setInstanceFollowRedirects(false);
+                conn.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (Linux; Android 11; SDK 30) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36");
+                conn.setRequestProperty("Accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
 
                 int responseCode = conn.getResponseCode();
                 Log.d("WebViewManager", "fetchDashboard: HTTP " + responseCode);
 
-                if (responseCode < 200 || responseCode >= 400) {
-                    Log.e("WebViewManager", "fetchDashboard: unexpected HTTP " + responseCode);
-                    AppLogger.warn("WebViewManager", "fetchDashboard: HTTP error " + responseCode);
+                // --- Path 1: Direct 3xx redirect ---
+                if (responseCode >= 300 && responseCode < 400) {
+                    String location = conn.getHeaderField("Location");
+                    Log.d("WebViewManager", "fetchDashboard: redirect Location=" + location);
+                    AppLogger.log("WebViewManager", "fetchDashboard: 3xx redirect, Location=" + location);
+
+                    if (location != null && location.contains("accounts.google.com")) {
+                        // Server redirected straight to the Google OAuth URL with valid state.
+                        Log.d("WebViewManager", "fetchDashboard: Google redirect — launching Chrome");
+                        AppLogger.log("WebViewManager", "fetchDashboard: direct Google redirect, launching Chrome");
+                        final String redirectUrl = location;
+                        activity.runOnUiThread(() -> launchGoogleLoginUrl(activity, redirectUrl));
+                        return;
+                    }
+
+                    // 3xx to somewhere else — fall through to fallback
+                    Log.w("WebViewManager",
+                        "fetchDashboard: redirect not to Google (" + location + ") — fallback");
+                    openDashboardFallback(activity, dashboardUrl);
                     return;
                 }
 
-                // Read the full response body
+                // --- HTTP error ---
+                if (responseCode < 200 || responseCode >= 400) {
+                    Log.e("WebViewManager", "fetchDashboard: HTTP error " + responseCode + " — fallback");
+                    AppLogger.warn("WebViewManager",
+                        "fetchDashboard: HTTP " + responseCode + ", falling back to Chrome dashboard");
+                    openDashboardFallback(activity, dashboardUrl);
+                    return;
+                }
+
+                // --- Path 2: 200 HTML body — parse for Google OAuth URL ---
                 StringBuilder sb = new StringBuilder();
                 try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(conn.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                        new InputStreamReader(
+                            conn.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
                     String line;
                     while ((line = reader.readLine()) != null) {
                         sb.append(line).append('\n');
@@ -175,51 +214,62 @@ public class WebViewManager {
                 String html = sb.toString();
                 Log.d("WebViewManager", "fetchDashboard: response length=" + html.length());
 
-                // Extract the server-generated Google OAuth URL.
-                // The dashboard HTML contains a link/redirect to accounts.google.com/o/oauth2/
-                // with Ubisoft's encrypted state parameter already embedded.
                 Pattern pattern = Pattern.compile(
                     "(https://accounts\\.google\\.com/o/oauth2/[^\"'\\s<>\\\\]+)");
                 Matcher matcher = pattern.matcher(html);
 
                 if (!matcher.find()) {
-                    Log.e("WebViewManager", "fetchDashboard: no Google OAuth URL found in response");
-                    AppLogger.warn("WebViewManager", "fetchDashboard: failed to parse Google OAuth URL from dashboard HTML");
+                    // Log the first 500 chars so we can diagnose what Ubisoft returned
+                    String preview = html.length() > 500 ? html.substring(0, 500) : html;
+                    Log.e("WebViewManager",
+                        "fetchDashboard: no Google OAuth URL found. Response preview:\n" + preview);
+                    AppLogger.warn("WebViewManager",
+                        "fetchDashboard: parse failed — falling back to Chrome dashboard");
+                    openDashboardFallback(activity, dashboardUrl);
                     return;
                 }
 
                 String googleOAuthUrl = matcher.group(1);
-
-                // Unescape HTML entities that the HTML parser would normally handle
+                // Unescape HTML entities
                 googleOAuthUrl = googleOAuthUrl.replace("&amp;", "&");
 
-                Log.d("WebViewManager", "fetchDashboard: extracted Google OAuth URL=" + googleOAuthUrl);
-                AppLogger.log("WebViewManager", "fetchDashboard: launching Chrome with server-generated Google OAuth URL");
+                Log.d("WebViewManager", "fetchDashboard: extracted URL=" + googleOAuthUrl);
+                AppLogger.log("WebViewManager",
+                    "fetchDashboard: launching Chrome with server-generated Google OAuth URL");
 
                 final String finalUrl = googleOAuthUrl;
                 activity.runOnUiThread(() -> launchGoogleLoginUrl(activity, finalUrl));
 
             } catch (Exception e) {
                 Log.e("WebViewManager", "fetchDashboard: exception — " + e.getMessage(), e);
-                AppLogger.warn("WebViewManager", "fetchDashboard: exception: " + e.getMessage());
+                AppLogger.warn("WebViewManager",
+                    "fetchDashboard: exception: " + e.getMessage() + " — fallback");
+                openDashboardFallback(activity, dashboardUrl);
             } finally {
-                if (conn != null) {
-                    conn.disconnect();
-                }
+                if (conn != null) conn.disconnect();
             }
         }, "DashboardFetch").start();
     }
 
     /**
-     * Starts the Google OAuth flow by fetching the server-generated OAuth URL from
-     * Ubisoft's login dashboard, then opening it in Chrome.
-     *
-     * <p>The dashboard provides the {@code state} parameter encrypted by Ubisoft's server.
-     * Without it, {@code /google/callback} rejects the response with
-     * "Oops, too many people trying to login at once."
+     * Fallback when dashboard fetch cannot extract a Google OAuth URL.
+     * Opens the valKey dashboard URL directly in Chrome so the user can
+     * tap "Continue with Google" manually rather than hanging indefinitely.
      */
-    static void launchGoogleLogin(Activity activity) {
-        Log.d("WebViewManager", "launchGoogleLogin: fetching server-generated URL from Ubisoft dashboard");
+    private static void openDashboardFallback(Activity activity, String dashboardUrl) {
+        Log.d("WebViewManager", "fetchDashboard: fallback — opening dashboard in Chrome: " + dashboardUrl);
+        AppLogger.log("WebViewManager", "fetchDashboard: fallback — opening valKey dashboard in Chrome");
+        activity.runOnUiThread(() -> launchGoogleLoginUrl(activity, dashboardUrl));
+    }
+
+    /**
+     * Starts the Google OAuth flow: fetches the server-generated OAuth URL from
+     * Ubisoft's dashboard (using {@link #last_url} which contains the session
+     * {@code ?valKey=...}), then opens it in Chrome.
+     */
+    void launchGoogleLogin(Activity activity) {
+        Log.d("WebViewManager",
+            "launchGoogleLogin: fetching server-generated URL from dashboard (" + this.last_url + ")");
         AppLogger.log("WebViewManager", "launchGoogleLogin: starting dashboard fetch for Google OAuth");
         fetchDashboardAndLaunchGoogle(activity);
     }
@@ -227,16 +277,12 @@ public class WebViewManager {
     /**
      * Launches the system browser (Chrome) with the given {@code url}.
      *
-     * <p>Prefer {@link #launchGoogleLogin} for the standard Google OAuth flow.
-     * Use this overload only when the popup-intercept path provides a
-     * server-generated URL that already contains the correct {@code state}.
-     *
      * <p>Idempotent: if Chrome has already been launched for this auth session
      * ({@link #sChromeLaunched} is {@code true}), the call is a no-op.
      */
     static void launchGoogleLoginUrl(Activity activity, String url) {
         if (sChromeLaunched) {
-            Log.d("WebViewManager", "launchGoogleLoginUrl: Chrome already launched this session — skipping");
+            Log.d("WebViewManager", "launchGoogleLoginUrl: Chrome already launched — skipping");
             return;
         }
         sChromeLaunched = true;
@@ -255,8 +301,6 @@ public class WebViewManager {
 
     /**
      * Handles {@code grow://} deep-link URLs that arrive inside an in-app WebView.
-     * Safety net for the popup flow; in the Chrome-external flow this is normally
-     * not reached.
      */
     boolean handleGrowUrl(String url) {
         if (url == null || !url.startsWith("grow://")) return false;
@@ -273,7 +317,9 @@ public class WebViewManager {
                 final String safeToken = token;
                 ZennKuyBridge.sTokenDelivered = true;
                 baseActivity.runOnUiThread(() -> {
-                    AppLogger.log("WebView", "grow:// fallback: delivering token via nativeOnScriptCall (len=" + safeToken.length() + ")");
+                    AppLogger.log("WebView",
+                        "grow:// fallback: delivering token via nativeOnScriptCall (len="
+                        + safeToken.length() + ")");
                     this.hideWebViewSync();
                     WebViewManager.this.nativeOnScriptCall("nativeSignIn", safeToken);
                     WebViewManager.this.HideWebView();
@@ -320,7 +366,7 @@ public class WebViewManager {
                 public boolean onCreateWindow(WebView view, boolean isDialog,
                                               boolean isUserGesture,
                                               android.os.Message resultMsg) {
-                    Log.d("WebViewManager", "onCreateWindow: popup requested (Google OAuth or other)");
+                    Log.d("WebViewManager", "onCreateWindow: popup requested");
                     AppLogger.log("WebViewManager", "onCreateWindow: creating popup WebView");
 
                     final WebView popup = new WebView(baseActivity);
@@ -342,24 +388,21 @@ public class WebViewManager {
 
                         private boolean interceptPopupUrl(String url) {
                             if (url == null) return false;
-
-                            // Popup navigated to accounts.google.com — this URL was generated
-                            // by the page JS and already contains the valid server state.
                             if (url.contains("accounts.google.com")) {
-                                Log.d("WebViewManager", "popup: intercepting Google OAuth URL → Chrome: " + url);
-                                AppLogger.log("WebViewManager", "popup: redirecting Google OAuth to Chrome");
+                                Log.d("WebViewManager",
+                                    "popup: intercepting Google OAuth URL → Chrome: " + url);
+                                AppLogger.log("WebViewManager",
+                                    "popup: redirecting Google OAuth to Chrome");
                                 baseActivity.runOnUiThread(() -> {
                                     closePopup(popup);
                                     launchGoogleLoginUrl(baseActivity, url);
                                 });
                                 return true;
                             }
-
                             if (handleGrowUrl(url)) {
                                 baseActivity.runOnUiThread(() -> closePopup(popup));
                                 return true;
                             }
-
                             return false;
                         }
                     });
@@ -373,7 +416,8 @@ public class WebViewManager {
                     });
 
                     ((SharedActivity) baseActivity).mViewGroup.addView(popup);
-                    WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                    WebView.WebViewTransport transport =
+                        (WebView.WebViewTransport) resultMsg.obj;
                     transport.setWebView(popup);
                     resultMsg.sendToTarget();
                     return true;
@@ -409,29 +453,26 @@ public class WebViewManager {
 
     /**
      * Called by the game engine (via JNI) to show the login selection dialog.
-     *
-     * <p>This method shows the in-app WebView with the Growtopia login page
-     * (Continue with Apple / Continue with Google / Growtopia Login).
-     * <b>It does NOT open Chrome directly</b> — Chrome is only launched later,
-     * when the user taps "Continue with Google" and the page JS fires
-     * {@code NativeApp.nativeSignIn(...)}, handled in
-     * {@link WebViewJavascriptInterface#nativeSignIn}.
+     * Does NOT open Chrome — Chrome opens only when nativeSignIn fires.
      */
-    public void LoadURLPost(final String url, final byte[] postData, final boolean allowExternal) {
+    public void LoadURLPost(final String url, final byte[] postData,
+                            final boolean allowExternal) {
         this.webViewWorkExecutor.execute(() ->
             this.baseActivity.runOnUiThread(() -> {
                 this.allowExternalLinks = allowExternal;
                 this.last_url = url;
                 if (postData != null) {
-                    this.last_packet = new String(postData, java.nio.charset.StandardCharsets.ISO_8859_1);
+                    this.last_packet = new String(
+                        postData, java.nio.charset.StandardCharsets.ISO_8859_1);
                 }
 
-                // Fast path: stored ltoken — inject directly, no browser, no WebView.
+                // Fast path: stored ltoken
                 LoginSpoof spoof = getActiveSpoof();
                 if (spoof != null) {
                     String ltoken = spoof.getLtoken();
                     if (!ltoken.isEmpty()) {
-                        AppLogger.log("WebViewManager", "ltoken spoof active — injecting stored ltoken directly");
+                        AppLogger.log("WebViewManager",
+                            "ltoken spoof active — injecting stored ltoken directly");
                         nativeOnScriptCall("nativeSignIn", ltoken);
                         return;
                     }
@@ -440,25 +481,24 @@ public class WebViewManager {
                         Log.d("WebViewManager", "ltoken empty, exchanging refresh token");
                         spoof.exchangeStoredRefreshToken(new LoginSpoof.ExchangeCallback() {
                             @Override public void onSuccess(String lt) {
-                                Log.d("WebViewManager", "refresh->ltoken OK, injecting");
                                 nativeOnScriptCall("nativeSignIn", lt);
                             }
                             @Override public void onFailure(String msg, String raw) {
-                                Log.w("WebViewManager", "refresh->ltoken failed: " + msg + " — showing WebView");
                                 baseActivity.runOnUiThread(() -> showAndPostUrl(url, postData));
                             }
                         });
                         return;
                     }
-                    Log.w("WebViewManager", "ltoken spoof enabled but no tokens stored; showing WebView");
+                    Log.w("WebViewManager",
+                        "ltoken spoof enabled but no tokens stored; showing WebView");
                 }
 
-                // Normal path — show the login selection dialog in the in-app WebView.
-                // Chrome is NOT opened here; it opens only when nativeSignIn fires.
+                // Normal path
                 ZennKuyBridge.sTokenDelivered = false;
                 sChromeLaunched = false;
                 ClearCookieWebData();
-                AppLogger.log("WebViewManager", "LoadURLPost: showing login selection dialog in WebView");
+                AppLogger.log("WebViewManager",
+                    "LoadURLPost: showing login selection dialog in WebView");
                 Log.d("WebViewManager", "LoadURLPost: showing WebView — url=" + url);
                 showAndPostUrl(url, postData);
             })
@@ -486,7 +526,8 @@ public class WebViewManager {
             this.baseActivity.runOnUiThread(() -> {
                 WebView wv = this.webView;
                 if (wv == null) return;
-                RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams((int) w, (int) h);
+                RelativeLayout.LayoutParams lp =
+                    new RelativeLayout.LayoutParams((int) w, (int) h);
                 lp.setMargins((int) x, (int) y, 0, 0);
                 wv.setLayoutParams(lp);
             })
@@ -534,7 +575,8 @@ public class WebViewManager {
                 this.to_render = "";
                 return;
             }
-            this.webView.loadUrl("javascript:NativeApp.pageContent(document.body.innerText)");
+            this.webView.loadUrl(
+                "javascript:NativeApp.pageContent(document.body.innerText)");
         });
     }
 
@@ -548,15 +590,8 @@ public class WebViewManager {
         /**
          * Called by the Growtopia login page JS: {@code NativeApp.nativeSignIn(token)}
          *
-         * <p><b>Always launches Chrome via dashboard fetch.</b> Whether the page calls
-         * this with an empty string (user explicitly tapped "Continue with Google") or
-         * with a cached token (page auto-plays a previous session), the correct action
-         * is the same: clear all stale state and open Chrome with the server-generated
-         * OAuth URL fetched from the Ubisoft dashboard.
-         *
-         * <p>Real session tokens ONLY arrive via:
-         * {@code grow://} → {@link Main#onNewIntent} → {@link Main#HandleDeeplink}
-         * → {@code NativeAppInterface.OnDeepLinkProcess(schemeSpecificPart)}
+         * Always launches Chrome via dashboard fetch (using the stored valKey URL).
+         * Never processes the token here — real session tokens arrive via grow://.
          */
         @JavascriptInterface
         public void nativeSignIn(String token) {
@@ -566,18 +601,22 @@ public class WebViewManager {
             sChromeLaunched = false;
 
             AppLogger.log("JSInterface",
-                "nativeSignIn fired — token len=" + (token != null ? token.length() : "null")
-                + " — force-clearing stale state, fetching dashboard URL, launching Chrome");
+                "nativeSignIn fired — token len="
+                + (token != null ? token.length() : "null")
+                + " — clearing state, fetching dashboard, launching Chrome");
             Log.d("JSInterface",
-                "nativeSignIn: cleared sTokenDelivered + sChromeLaunched; token len="
+                "nativeSignIn: cleared flags; token len="
                 + (token != null ? token.length() : 0));
 
             WebViewManager.this.baseActivity.runOnUiThread(() -> {
                 WebViewManager.this.hideWebViewSync();
-                android.widget.Toast.makeText(Main.mainApp,
-                        "Opening Google sign-in...",
-                        android.widget.Toast.LENGTH_SHORT).show();
-                launchGoogleLogin(WebViewManager.this.baseActivity);
+                android.widget.Toast.makeText(
+                    Main.mainApp,
+                    "Opening Google sign-in...",
+                    android.widget.Toast.LENGTH_SHORT).show();
+                // Instance call — reads this.last_url for the valKey dashboard URL
+                WebViewManager.this.launchGoogleLogin(
+                    WebViewManager.this.baseActivity);
                 WebViewManager.this.HideWebView();
             });
         }
@@ -605,19 +644,14 @@ public class WebViewManager {
             Log.d("JSInterface", "openInBrowser: " + url);
             WebViewManager.this.baseActivity.runOnUiThread(() ->
                 WebViewManager.this.baseActivity.startActivity(
-                    new Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            );
+                    new Intent(Intent.ACTION_VIEW, Uri.parse(url))));
         }
 
-        /**
-         * Called by some Growtopia page versions with a full server-generated
-         * Google OAuth URL (includes the correct {@code state} parameter).
-         * Open Chrome with that exact URL so state validation passes.
-         */
         @JavascriptInterface
         public void openAsResult(final String url) {
             Log.d("JSInterface", "openAsResult: url=" + url);
-            AppLogger.log("JSInterface", "openAsResult: launching Chrome with server-provided URL");
+            AppLogger.log("JSInterface",
+                "openAsResult: launching Chrome with server-provided URL");
             ZennKuyBridge.sTokenDelivered = false;
             sChromeLaunched = false;
             WebViewManager.this.baseActivity.runOnUiThread(() -> {
@@ -638,7 +672,8 @@ public class WebViewManager {
         }
 
         @Override
-        public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+        public boolean shouldOverrideUrlLoading(WebView view,
+                                                WebResourceRequest request) {
             return interceptUrl(request.getUrl().toString());
         }
 
@@ -655,28 +690,42 @@ public class WebViewManager {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
+            view.loadUrl(
+                "javascript:(function f() {"
+                + "var element = document.getElementsByTagName(\"a\");"
+                + "for (const value of element) {"
+                + "value.addEventListener(\"click\", function(e) {"
+                + "if (e.currentTarget.target == '_blank') {"
+                + "e.preventDefault();"
+                + " NativeApp.openInBrowser(e.currentTarget.href);"
+                + " return false;}}}})()");
             this.listener.OnPageLoaded(url);
         }
 
         @Override
-        public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+        public void onReceivedError(WebView view, WebResourceRequest request,
+                                    WebResourceError error) {
             super.onReceivedError(view, request, error);
-            Log.e("WebView", "onReceivedError [" + error.getDescription() + "] : " + request.getUrl());
+            Log.e("WebView", "onReceivedError [" + error.getDescription()
+                + "] : " + request.getUrl());
             this.listener.OnError(error.getErrorCode());
         }
 
         @Override
-        public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+        public void onReceivedSslError(WebView view, SslErrorHandler handler,
+                                       SslError error) {
             super.onReceivedSslError(view, handler, error);
-            Log.e("WebView", "onReceivedSslError [" + error.getPrimaryError() + "] : " + error);
+            Log.e("WebView", "onReceivedSslError [" + error.getPrimaryError()
+                + "] : " + error);
             this.listener.OnError(error.getPrimaryError());
         }
 
         @Override
-        public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
+        public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                                        WebResourceResponse response) {
             super.onReceivedHttpError(view, request, response);
-            Log.e("WebView", "onReceivedHttpError [" + response.getStatusCode() + "] : " + request.getUrl());
+            Log.e("WebView", "onReceivedHttpError [" + response.getStatusCode()
+                + "] : " + request.getUrl());
             this.listener.OnError(response.getStatusCode());
         }
     }
@@ -689,7 +738,6 @@ public class WebViewManager {
             if (files != null) {
                 for (File f : files) {
                     if (isStaleWebViewDataDirectory(f.getName())) {
-                        Log.d("WebViewManager", "Deleting stale WebView data dir: " + f.getAbsolutePath());
                         deleteRecursively(f);
                     }
                 }
@@ -700,7 +748,6 @@ public class WebViewManager {
             if (files != null) {
                 for (File f : files) {
                     if (isStaleWebViewCacheDirectory(f.getName())) {
-                        Log.d("WebViewManager", "Deleting stale WebView cache dir: " + f.getAbsolutePath());
                         deleteRecursively(f);
                     }
                 }
@@ -720,7 +767,7 @@ public class WebViewManager {
 
     private void safeDeleteDatabase(String name) {
         try {
-            Log.d("WebViewManager", "deleteDatabase(" + name + ") = " + this.baseActivity.deleteDatabase(name));
+            this.baseActivity.deleteDatabase(name);
         } catch (Throwable t) {
             Log.e("WebViewManager", "Failed to delete database: " + name, t);
         }
@@ -738,7 +785,8 @@ public class WebViewManager {
             }
         }
         if (!file.delete()) {
-            Log.w("WebViewManager", "Failed to delete: " + file.getAbsolutePath());
+            Log.w("WebViewManager",
+                "Failed to delete: " + file.getAbsolutePath());
             return false;
         }
         return ok;
