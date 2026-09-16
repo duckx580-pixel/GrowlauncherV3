@@ -40,11 +40,27 @@ public class WebViewManager {
 
     static volatile boolean sChromeLaunched = false;
 
-    // Google OAuth constants — real web client ID from Growtopia's strings.xml.
-    private static final String GOOGLE_CLIENT_ID =
-        "588841715802-is413qb7l33h13g0cqv0imi8bk87pmv7.apps.googleusercontent.com";
+    /**
+     * Redirect URI — Ubisoft's server-side Google callback endpoint.
+     * This is stable; it is not a client credential.
+     */
     private static final String GOOGLE_REDIRECT_URI =
         "https://login.growtopiagame.com/google/callback";
+
+    /**
+     * Captured at runtime from the page's inline JavaScript.
+     * The page carries the live client_id; we harvest it via JS injection
+     * rather than hardcoding it so Ubisoft credential rotations are
+     * handled automatically.
+     */
+    private volatile String capturedClientId  = null;
+
+    /**
+     * Captured at runtime if the page calls window.open or navigates
+     * location.href directly to accounts.google.com. When present this
+     * URL is used verbatim — the page already built it correctly.
+     */
+    private volatile String capturedOAuthUrl  = null;
 
     public boolean needed_to_render = false;
     public String to_render = "";
@@ -162,15 +178,13 @@ public class WebViewManager {
     // -----------------------------------------------------------------------
 
     /**
-     * Builds the Google OAuth authorization URL from a Ubisoft session state
-     * token and launches it in Chrome.
+     * Builds a Google OAuth URL from a dynamically-captured client_id and
+     * Ubisoft's session state token, then launches it in Chrome.
      *
-     * <p>The {@code state} parameter is the 576-char opaque string the
-     * Growtopia dashboard delivers via {@code NativeApp.nativeSignIn(state)}.
-     * Ubisoft's callback endpoint ({@code /google/callback}) validates this
-     * state on return from Google, so it must be forwarded verbatim.
+     * @param state    the 576-char Ubisoft state token from nativeSignIn
+     * @param clientId the Google OAuth client_id harvested from the page JS
      */
-    private void launchGoogleOAuth(String state) {
+    private void launchGoogleOAuth(String state, String clientId) {
         if (sChromeLaunched) {
             Log.d("WebViewManager", "launchGoogleOAuth: Chrome already launched — skipping");
             return;
@@ -179,7 +193,7 @@ public class WebViewManager {
 
         Uri oauthUri = Uri.parse("https://accounts.google.com/o/oauth2/v2/auth")
             .buildUpon()
-            .appendQueryParameter("client_id",     GOOGLE_CLIENT_ID)
+            .appendQueryParameter("client_id",     clientId)
             .appendQueryParameter("redirect_uri",  GOOGLE_REDIRECT_URI)
             .appendQueryParameter("response_type", "code")
             .appendQueryParameter("scope",         "openid profile email")
@@ -187,32 +201,15 @@ public class WebViewManager {
             .appendQueryParameter("state",         state)
             .build();
 
-        Log.d("WebViewManager", "launchGoogleOAuth: built URL — " + oauthUri);
-        AppLogger.log("WebViewManager", "launchGoogleOAuth: launching Chrome for Google OAuth");
-
-        // Prefer Chrome explicitly; fall back to whatever handles ACTION_VIEW.
-        Intent intent = new Intent(Intent.ACTION_VIEW, oauthUri);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        intent.setPackage("com.android.chrome");
-        try {
-            baseActivity.startActivity(intent);
-        } catch (android.content.ActivityNotFoundException ignored) {
-            // Chrome not installed — try default browser.
-            intent.setPackage(null);
-            try {
-                baseActivity.startActivity(intent);
-            } catch (android.content.ActivityNotFoundException e2) {
-                sChromeLaunched = false;
-                Log.e("WebViewManager", "launchGoogleOAuth: no browser found: " + e2.getMessage());
-                AppLogger.warn("WebViewManager", "launchGoogleOAuth: no browser available");
-            }
-        }
+        Log.d("WebViewManager", "launchGoogleOAuth: URL — " + oauthUri);
+        AppLogger.log("WebViewManager",
+            "launchGoogleOAuth: launching Chrome (client_id=" + clientId + ")");
+        launchInChrome(oauthUri.toString());
     }
 
     /**
-     * Launches a fully-formed Google OAuth (or grow://) URL in Chrome.
-     * Called from the popup WebViewClient and the shouldOverrideUrlLoading
-     * safety net when the page navigates to accounts.google.com directly.
+     * Launches a fully-formed URL (Google OAuth or grow://) in Chrome.
+     * Called when the page gave us a complete URL via window.open hook.
      */
     static void launchGoogleLoginUrl(Activity activity, String url) {
         if (sChromeLaunched) {
@@ -220,8 +217,16 @@ public class WebViewManager {
             return;
         }
         sChromeLaunched = true;
-        Log.d("WebViewManager", "launchGoogleLoginUrl: sending URL to Chrome — " + url);
+        Log.d("WebViewManager", "launchGoogleLoginUrl: launching Chrome — " + url);
         AppLogger.log("WebViewManager", "launchGoogleLoginUrl: launching Chrome");
+        launchInChromeStatic(activity, url);
+    }
+
+    private void launchInChrome(String url) {
+        launchInChromeStatic(baseActivity, url);
+    }
+
+    private static void launchInChromeStatic(Activity activity, String url) {
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.setPackage("com.android.chrome");
@@ -233,7 +238,8 @@ public class WebViewManager {
                 activity.startActivity(intent);
             } catch (android.content.ActivityNotFoundException e2) {
                 sChromeLaunched = false;
-                Log.e("WebViewManager", "launchGoogleLoginUrl: no browser found: " + e2.getMessage());
+                Log.e("WebViewManager", "launchInChrome: no browser available: " + e2.getMessage());
+                AppLogger.warn("WebViewManager", "launchInChrome: no browser");
             }
         }
     }
@@ -401,6 +407,10 @@ public class WebViewManager {
                     this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
                 }
 
+                // Reset captured OAuth values for this new login session.
+                this.capturedClientId = null;
+                this.capturedOAuthUrl = null;
+
                 LoginSpoof spoof = getActiveSpoof();
                 if (spoof != null) {
                     String ltoken = spoof.getLtoken();
@@ -517,15 +527,44 @@ public class WebViewManager {
         WebViewJavascriptInterface(WebViewManager wvm) { this.webviewManager = wvm; }
 
         /**
-         * Called by the Growtopia dashboard page when the user taps a login
-         * button. The {@code token} argument is Ubisoft's session {@code state}
-         * parameter (~576 chars), NOT a Google OAuth URL and NOT the final
-         * auth token.
+         * Invoked by JS hook when the page calls window.open() or sets
+         * location.href with an accounts.google.com URL.
+         * Stores the URL so nativeSignIn can use it directly.
+         */
+        @JavascriptInterface
+        public void captureFullOAuthUrl(String url) {
+            if (url == null || url.isEmpty()) return;
+            Log.d("JSInterface", "captureFullOAuthUrl: captured — " + url);
+            AppLogger.log("JSInterface", "captureFullOAuthUrl: page-built OAuth URL captured");
+            WebViewManager.this.capturedOAuthUrl = url;
+        }
+
+        /**
+         * Invoked by JS hook when a client_id pattern is found in inline
+         * scripts. Stores it so nativeSignIn can build the OAuth URL.
+         */
+        @JavascriptInterface
+        public void captureGoogleClientId(String clientId) {
+            if (clientId == null || clientId.isEmpty()) return;
+            Log.d("JSInterface", "captureGoogleClientId: captured — " + clientId);
+            AppLogger.log("JSInterface",
+                "captureGoogleClientId: client_id from page = " + clientId);
+            WebViewManager.this.capturedClientId = clientId;
+        }
+
+        /**
+         * Called by the Growtopia dashboard when the user taps a login
+         * button. {@code token} is Ubisoft's session {@code state} parameter
+         * (~576 chars). We use it as the {@code state} in the Google OAuth
+         * URL. The actual client_id is taken from what the page itself
+         * exposes (capturedOAuthUrl or capturedClientId).
          *
-         * <p>The page never navigates the WebView after this call —
-         * {@code shouldOverrideUrlLoading} will NOT fire. We build the Google
-         * OAuth URL ourselves, injecting {@code token} as the {@code state}
-         * parameter, hide the WebView, and launch Chrome immediately.
+         * <p>Priority order:
+         * <ol>
+         *   <li>capturedOAuthUrl — use verbatim (page built it, it is correct)</li>
+         *   <li>capturedClientId — build URL from it + Ubisoft state</li>
+         *   <li>Neither — log error, cannot proceed</li>
+         * </ol>
          */
         @JavascriptInterface
         public void nativeSignIn(String token) {
@@ -537,20 +576,46 @@ public class WebViewManager {
                 + " token=[" + token + "]");
             AppLogger.log("JSInterface",
                 "nativeSignIn: Ubisoft state received (len="
-                + (token != null ? token.length() : "null") + ") — building OAuth URL");
+                + (token != null ? token.length() : "null") + ")");
 
             if (token == null || token.isEmpty()) {
-                Log.e("JSInterface", "nativeSignIn: empty state token — cannot build OAuth URL");
+                Log.e("JSInterface", "nativeSignIn: empty state token");
                 AppLogger.warn("JSInterface", "nativeSignIn: empty token");
                 return;
             }
 
             final String state = token;
             WebViewManager.this.baseActivity.runOnUiThread(() -> {
-                // Hide the login dialog — Chrome takes over from here.
                 WebViewManager.this.hideWebViewSync();
-                // Build and launch the Google OAuth URL with Ubisoft's state.
-                WebViewManager.this.launchGoogleOAuth(state);
+
+                // Priority 1: page handed us a fully-formed OAuth URL.
+                String fullUrl = WebViewManager.this.capturedOAuthUrl;
+                if (fullUrl != null && fullUrl.contains("accounts.google.com")) {
+                    Log.d("JSInterface",
+                        "nativeSignIn: using captured OAuth URL from page");
+                    AppLogger.log("JSInterface",
+                        "nativeSignIn: launching Chrome with page-built URL");
+                    launchGoogleLoginUrl(WebViewManager.this.baseActivity, fullUrl);
+                    return;
+                }
+
+                // Priority 2: we captured the client_id from inline JS.
+                String clientId = WebViewManager.this.capturedClientId;
+                if (clientId != null && !clientId.isEmpty()) {
+                    Log.d("JSInterface",
+                        "nativeSignIn: building OAuth URL with captured client_id=" + clientId);
+                    AppLogger.log("JSInterface",
+                        "nativeSignIn: building OAuth URL (client_id=" + clientId + ")");
+                    WebViewManager.this.launchGoogleOAuth(state, clientId);
+                    return;
+                }
+
+                // Priority 3: nothing was captured — log and bail.
+                Log.e("JSInterface",
+                    "nativeSignIn: no OAuth URL or client_id captured from page — "
+                    + "check JS injection logs above");
+                AppLogger.warn("JSInterface",
+                    "nativeSignIn: no OAuth credentials available from page");
             });
         }
 
@@ -600,6 +665,47 @@ public class WebViewManager {
         private final Activity baseActivity;
         private final WebViewCallbackListener listener;
 
+        // JS to inject after page load:
+        //   1. anchor-tag _blank handler (original)
+        //   2. window.open hook → captureFullOAuthUrl
+        //   3. Location.prototype.href hook → captureFullOAuthUrl
+        //   4. inline-script scan for client_id pattern → captureGoogleClientId
+        //   5. <a href=accounts.google.com> scan → captureFullOAuthUrl
+        private static final String HOOK_JS =
+            "(function(){" +
+            // ---- 1. anchor _blank handler (original) ----
+            "var _a=document.getElementsByTagName('a');" +
+            "for(var _v of _a){_v.addEventListener('click',function(e){" +
+            "if(e.currentTarget.target=='_blank'){" +
+            "e.preventDefault();NativeApp.openInBrowser(e.currentTarget.href);" +
+            "return false;}});} " +
+            // ---- 2. window.open hook ----
+            "var _o=window.open;" +
+            "window.open=function(u,n,f){" +
+            "if(u&&u.indexOf('accounts.google.com')>=0){" +
+            "try{NativeApp.captureFullOAuthUrl(u);}catch(e){}" +
+            "return{closed:false,close:function(){}};" +
+            "}return _o?_o.apply(this,arguments):null;};" +
+            // ---- 3. Location.prototype.href setter hook ----
+            "try{var _d=Object.getOwnPropertyDescriptor(Location.prototype,'href');" +
+            "if(_d&&_d.set){var _s=_d.set;" +
+            "Object.defineProperty(Location.prototype,'href',{" +
+            "set:function(u){" +
+            "if(u&&u.indexOf('accounts.google.com')>=0){" +
+            "try{NativeApp.captureFullOAuthUrl(u);}catch(e){}return;}" +
+            "_s.call(this,u);}," +
+            "get:_d.get,configurable:true});}}catch(e){} " +
+            // ---- 4. Scan inline scripts for client_id ----
+            "try{var _t='';" +
+            "document.querySelectorAll('script').forEach(function(s){_t+=s.innerText||'';});" +
+            "var _m=_t.match(/([0-9]+-[a-z0-9]+\\.apps\\.googleusercontent\\.com)/);" +
+            "if(_m)NativeApp.captureGoogleClientId(_m[1]);}catch(e){} " +
+            // ---- 5. Scan <a> tags ----
+            "try{document.querySelectorAll('a[href*=\"accounts.google.com\"]')" +
+            ".forEach(function(a){try{NativeApp.captureFullOAuthUrl(a.href);}catch(e){}});" +
+            "}catch(e){}" +
+            "})();";
+
         WebViewClientImpl(Activity a, WebViewCallbackListener l) {
             this.baseActivity = a;
             this.listener = l;
@@ -632,14 +738,8 @@ public class WebViewManager {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl(
-                "javascript:(function f(){"
-                + "var a=document.getElementsByTagName('a');"
-                + "for(var v of a){v.addEventListener('click',function(e){"
-                + "if(e.currentTarget.target=='_blank'){"
-                + "e.preventDefault();"
-                + "NativeApp.openInBrowser(e.currentTarget.href);"
-                + "return false;}})}})();");
+            // Single loadUrl call with all hooks combined.
+            view.loadUrl("javascript:" + HOOK_JS);
             this.listener.OnPageLoaded(url);
         }
 
