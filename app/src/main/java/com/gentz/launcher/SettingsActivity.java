@@ -13,8 +13,8 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.gentz.launcher.R;
 import com.rtsoft.growtopia.DeviceSpoofer;
-import com.rtsoft.growtopia.R;
 
 /**
  * Settings screen: MAC, GID, RID spoofing, OpenGL spoof, fullscreen toggle.
