@@ -116,10 +116,7 @@ public class WebViewManager {
 
     /**
      * Opens a single {@link HttpURLConnection} to {@code targetUrl} without
-     * following redirects.  Returns the connection after calling
-     * {@link HttpURLConnection#connect()} (or rather after
-     * {@link HttpURLConnection#getResponseCode()}, which implicitly connects).
-     * Caller is responsible for disconnecting.
+     * following redirects.
      */
     private static HttpURLConnection openGet(String targetUrl) throws Exception {
         URL url = new URL(targetUrl);
@@ -158,132 +155,57 @@ public class WebViewManager {
 
     /**
      * Fetches the Ubisoft login dashboard (stored as {@link #last_url} with
-     * its session {@code ?valKey=...}) on a background thread and launches
-     * Chrome with the server-generated Google OAuth URL.
+     * its session {@code ?valKey=...}) on a background thread.
      *
-     * <p><b>Redirect chain (followed manually, 2 hops max):</b>
+     * <p><b>Redirect chain — one hop only:</b>
      * <pre>
      *   GET  last_url  (valKey URL — single-use, consumed here)
-     *     └ 302 Location = /player/link/dashboard/validate/eyJ…
-     *         └ GET validate URL
-     *             ├ 302 Location = accounts.google.com/…  → Chrome
-     *             └ 200 HTML  → regex-extract Google OAuth URL → Chrome
+     *     └ 302 Location = loc1  (validate URL — also single-use)
+     *         → hand loc1 to Chrome immediately; Chrome follows the rest
      * </pre>
      *
-     * <p><b>Fallback priority:</b> the validate URL (the live Location from
-     * hop 1) is always used as the fallback, never the dead valKey URL.
-     * If even the validate URL could not be obtained, falls back to
-     * {@code last_url} as a last resort.
+     * <p>We intentionally do NOT perform a hop2 GET on loc1.
+     * The validate JWT is single-use: consuming it in Java leaves a dead
+     * URL for Chrome and causes "Please try login again."
+     * Chrome receives loc1 fresh and follows validate → Google OAuth itself.
      */
     private void fetchDashboardAndLaunchGoogle(Activity activity) {
         final String dashboardUrl = this.last_url;
 
         new Thread(() -> {
             HttpURLConnection c1 = null;
-            HttpURLConnection c2 = null;
             try {
                 // ---- Hop 1: valKey dashboard URL ----
                 Log.d("WebViewManager", "fetchDashboard hop1: GET " + dashboardUrl);
-                AppLogger.log("WebViewManager",
-                    "fetchDashboard: hop1 GET dashboard (valKey)");
+                AppLogger.log("WebViewManager", "fetchDashboard: hop1 GET dashboard (valKey)");
                 c1 = openGet(dashboardUrl);
                 int code1 = c1.getResponseCode();
                 Log.d("WebViewManager", "fetchDashboard hop1: HTTP " + code1);
 
                 if (code1 >= 300 && code1 < 400) {
                     String loc1 = c1.getHeaderField("Location");
-                    Log.d("WebViewManager",
-                        "fetchDashboard hop1: redirect Location=" + loc1);
+                    Log.d("WebViewManager", "fetchDashboard hop1: redirect Location=" + loc1);
                     c1.disconnect(); c1 = null;
 
                     if (loc1 == null || loc1.isEmpty()) {
                         Log.e("WebViewManager",
-                            "fetchDashboard hop1: 3xx with no Location — dead end");
+                            "fetchDashboard hop1: 3xx with no Location — opening dashboardUrl");
                         openUrlFallback(activity, dashboardUrl);
                         return;
                     }
 
-                    if (loc1.contains("accounts.google.com")) {
-                        // Direct Google OAuth redirect — open Chrome immediately
-                        Log.d("WebViewManager",
-                            "fetchDashboard hop1: Google redirect, launching Chrome");
-                        AppLogger.log("WebViewManager",
-                            "fetchDashboard: hop1 direct Google redirect");
-                        final String gUrl = loc1;
-                        activity.runOnUiThread(() -> launchGoogleLoginUrl(activity, gUrl));
-                        return;
-                    }
-
-                    // ---- Hop 2: follow the validate (or other) redirect ----
-                    // The valKey is now consumed. loc1 is the live signed URL.
-                    // Use loc1 as the fallback from this point on — never dashboardUrl.
+                    // loc1 is either the validate URL or a direct Google redirect.
+                    // Hand it to Chrome NOW — do NOT GET it in Java.
+                    // Chrome follows the remaining redirect chain itself.
                     Log.d("WebViewManager",
-                        "fetchDashboard hop2: GET " + loc1);
+                        "fetchDashboard hop1: handing Location to Chrome: " + loc1);
                     AppLogger.log("WebViewManager",
-                        "fetchDashboard: hop2 GET validate URL");
-                    c2 = openGet(loc1);
-                    int code2 = c2.getResponseCode();
-                    Log.d("WebViewManager", "fetchDashboard hop2: HTTP " + code2);
-
-                    if (code2 >= 300 && code2 < 400) {
-                        String loc2 = c2.getHeaderField("Location");
-                        Log.d("WebViewManager",
-                            "fetchDashboard hop2: redirect Location=" + loc2);
-                        c2.disconnect(); c2 = null;
-
-                        if (loc2 != null && loc2.contains("accounts.google.com")) {
-                            Log.d("WebViewManager",
-                                "fetchDashboard hop2: Google redirect, launching Chrome");
-                            AppLogger.log("WebViewManager",
-                                "fetchDashboard: hop2 Google redirect");
-                            final String gUrl = loc2;
-                            activity.runOnUiThread(
-                                () -> launchGoogleLoginUrl(activity, gUrl));
-                        } else {
-                            // Unexpected second hop — open loc1 (validate URL) in Chrome
-                            Log.w("WebViewManager",
-                                "fetchDashboard hop2: unexpected redirect to " + loc2
-                                + " — opening validate URL in Chrome");
-                            openUrlFallback(activity, loc1);
-                        }
-                        return;
-                    }
-
-                    if (code2 == 200) {
-                        String html = readBody(c2);
-                        Log.d("WebViewManager",
-                            "fetchDashboard hop2: body length=" + html.length());
-                        String gUrl = extractGoogleUrl(html);
-                        if (gUrl != null) {
-                            Log.d("WebViewManager",
-                                "fetchDashboard hop2: extracted Google URL=" + gUrl);
-                            AppLogger.log("WebViewManager",
-                                "fetchDashboard: hop2 Google URL extracted");
-                            final String finalUrl = gUrl;
-                            activity.runOnUiThread(
-                                () -> launchGoogleLoginUrl(activity, finalUrl));
-                        } else {
-                            // Log preview and open validate URL in Chrome
-                            String preview = html.length() > 500
-                                ? html.substring(0, 500) : html;
-                            Log.e("WebViewManager",
-                                "fetchDashboard hop2: no Google URL found. Preview:\n"
-                                + preview);
-                            AppLogger.warn("WebViewManager",
-                                "fetchDashboard: hop2 parse failed — opening validate URL");
-                            openUrlFallback(activity, loc1);
-                        }
-                        return;
-                    }
-
-                    // hop2 returned an unexpected HTTP code — open validate URL in Chrome
-                    Log.e("WebViewManager",
-                        "fetchDashboard hop2: HTTP " + code2 + " — opening validate URL");
-                    openUrlFallback(activity, loc1);
+                        "fetchDashboard: hop1 redirect — opening Location in Chrome");
+                    final String targetUrl = loc1;
+                    activity.runOnUiThread(() -> launchGoogleLoginUrl(activity, targetUrl));
                     return;
                 }
 
-                // hop1 was not a redirect (200 or error)
                 if (code1 == 200) {
                     String html = readBody(c1);
                     Log.d("WebViewManager",
@@ -299,7 +221,7 @@ public class WebViewManager {
                         String preview = html.length() > 500
                             ? html.substring(0, 500) : html;
                         Log.e("WebViewManager",
-                            "fetchDashboard hop1: no Google URL. Preview:\n" + preview);
+                            "fetchDashboard hop1: no Google URL in 200. Preview:\n" + preview);
                         openUrlFallback(activity, dashboardUrl);
                     }
                     return;
@@ -317,7 +239,6 @@ public class WebViewManager {
                 openUrlFallback(activity, dashboardUrl);
             } finally {
                 if (c1 != null) c1.disconnect();
-                if (c2 != null) c2.disconnect();
             }
         }, "DashboardFetch").start();
     }
@@ -727,7 +648,7 @@ public class WebViewManager {
                 + "if(e.currentTarget.target=='_blank'){"
                 + "e.preventDefault();"
                 + "NativeApp.openInBrowser(e.currentTarget.href);"
-                + "return false;}})}})()");
+                + "return false;}})}})();");
             this.listener.OnPageLoaded(url);
         }
 
