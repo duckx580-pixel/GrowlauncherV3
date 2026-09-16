@@ -33,35 +33,44 @@ public class WebViewManager {
     boolean allowExternalLinks = true;
     private WebView webView = null;
 
+    // OAuth2 constants — never concatenate these manually; always use buildGoogleOAuthUri().
+    private static final String GOOGLE_CLIENT_ID =
+        "389994132396-4s6ol46f60831v5blfpci7lnmsdnh8br.apps.googleusercontent.com";
+    private static final String GOOGLE_REDIRECT_URI =
+        "https://login.growtopiagame.com/google/callback";
+
     /**
-     * Direct Google OAuth accountchooser URL.
+     * Builds the standard Google OAuth 2.0 authorization URL using {@link Uri.Builder}
+     * so every parameter is percent-encoded automatically.
      *
-     * <p>Used when the user taps "Continue with Google" in the in-app login
-     * dialog ({@link #nativeSignIn} path) and when the login page popup
-     * navigates to {@code accounts.google.com} (popup-intercept path).
+     * <p>Endpoint: {@code https://accounts.google.com/o/oauth2/v2/auth}
+     * (the public, stable OAuth2 endpoint — not {@code /v3/signin/accountchooser},
+     * which requires server-generated {@code dsh}/{@code continue}/{@code state}
+     * parameters and returns HTTP 400 when those are absent).
      *
-     * <p>This goes directly to Google's account chooser, bypassing the
-     * Growtopia server's {@code /player/login/google} endpoint — that endpoint
-     * is POST-only and returns 404 when Chrome GETs it.
-     *
-     * <p>Redirect chain in Chrome after the user picks an account:
+     * <p>Redirect chain after the user picks an account in Chrome:
      * <ol>
-     *   <li>Google redirects to {@code login.growtopiagame.com/google/callback?code=...}</li>
+     *   <li>Google → {@code login.growtopiagame.com/google/callback?code=...}</li>
      *   <li>Server exchanges the code for a session token</li>
-     *   <li>Server issues HTTP 302 to {@code grow://login?token=SESSION_TOKEN}</li>
-     *   <li>Android routes {@code grow://} to {@link Main#onNewIntent} via the
-     *       {@code <intent-filter>} in AndroidManifest.xml</li>
+     *   <li>Server issues HTTP 302 → {@code grow://login?token=SESSION_TOKEN}</li>
+     *   <li>Android routes {@code grow://} → {@link Main#onNewIntent} via the
+     *       {@code <intent-filter>} declared in AndroidManifest.xml</li>
      *   <li>{@code handleIntent} → {@link Main#HandleDeeplink} →
      *       {@code NativeAppInterface.OnDeepLinkProcess(schemeSpecificPart)}</li>
      * </ol>
      */
-    private static final String GOOGLE_OAUTH_URL =
-        "https://accounts.google.com/v3/signin/accountchooser" +
-        "?client_id=389994132396-4s6ol46f60831v5blfpci7lnmsdnh8br.apps.googleusercontent.com" +
-        "&redirect_uri=https%3A%2F%2Flogin.growtopiagame.com%2Fgoogle%2Fcallback" +
-        "&response_type=code" +
-        "&scope=openid+profile+email" +
-        "&prompt=select_account";
+    private static Uri buildGoogleOAuthUri() {
+        return new Uri.Builder()
+            .scheme("https")
+            .authority("accounts.google.com")
+            .path("/o/oauth2/v2/auth")
+            .appendQueryParameter("client_id", GOOGLE_CLIENT_ID)
+            .appendQueryParameter("redirect_uri", GOOGLE_REDIRECT_URI)
+            .appendQueryParameter("response_type", "code")
+            .appendQueryParameter("scope", "openid profile email")
+            .appendQueryParameter("prompt", "select_account")
+            .build();
+    }
 
     /**
      * Set to {@code true} before calling {@link #launchGoogleLoginUrl} to prevent
@@ -146,15 +155,22 @@ public class WebViewManager {
     }
 
     /**
-     * Launches the system browser (Chrome) with the direct Google accountchooser URL.
-     * Guards against double-launch with {@link #sChromeLaunched}.
+     * Launches the system browser (Chrome) with the Google OAuth2 URL built by
+     * {@link #buildGoogleOAuthUri()}.  Guards against double-launch with
+     * {@link #sChromeLaunched}.
      */
     static void launchGoogleLogin(Activity activity) {
-        launchGoogleLoginUrl(activity, GOOGLE_OAUTH_URL);
+        String url = buildGoogleOAuthUri().toString();
+        Log.d("WebViewManager", "launchGoogleLogin: built OAuth2 URL=" + url);
+        launchGoogleLoginUrl(activity, url);
     }
 
     /**
      * Launches the system browser (Chrome) with the given {@code url}.
+     *
+     * <p>Prefer {@link #launchGoogleLogin} for the standard Google OAuth flow.
+     * Use this overload only when the popup-intercept path provides a
+     * server-generated URL that already contains the correct {@code state}.
      *
      * <p>Idempotent: if Chrome has already been launched for this auth session
      * ({@link #sChromeLaunched} is {@code true}), the call is a no-op.
@@ -268,6 +284,9 @@ public class WebViewManager {
                         private boolean interceptPopupUrl(String url) {
                             if (url == null) return false;
 
+                            // Popup navigated to accounts.google.com — the server generated
+                            // this URL with a valid state parameter.  Use it directly
+                            // instead of our built URL so state validation passes.
                             if (url.contains("accounts.google.com")) {
                                 Log.d("WebViewManager", "popup: intercepting Google OAuth URL → Chrome: " + url);
                                 AppLogger.log("WebViewManager", "popup: redirecting Google OAuth to Chrome");
@@ -471,30 +490,19 @@ public class WebViewManager {
         /**
          * Called by the Growtopia login page JS: {@code NativeApp.nativeSignIn(token)}
          *
-         * <p><b>Always launches Chrome.</b>  Whether the page calls this with an
+         * <p><b>Always launches Chrome.</b> Whether the page calls this with an
          * empty string (user explicitly tapped "Continue with Google") or with a
-         * 576-char cached token (page auto-plays a previous Google session on load),
-         * the correct action is identical: clear all stale auth state and open
-         * Chrome with the Google accountchooser URL.
+         * cached token (page auto-plays a previous session), the correct action is
+         * the same: clear all stale state and open Chrome with a fresh OAuth2 URL.
          *
          * <p>Real session tokens ONLY arrive via:
          * {@code grow://} → {@link Main#onNewIntent} → {@link Main#HandleDeeplink}
          * → {@code NativeAppInterface.OnDeepLinkProcess(schemeSpecificPart)}
-         * They are never delivered through this method.
-         *
-         * <p><b>Why we reset before launching:</b> ZennKuyBridge.startResolving()
-         * checks {@code sTokenDelivered} at the top of its call.  If the page
-         * auto-called {@code nativeSignIn(cachedToken)} on load and we set
-         * {@code sTokenDelivered = true} at that point, the bridge treats any
-         * subsequent call as a duplicate and returns early.  By resetting at the
-         * very beginning of every {@code nativeSignIn} call, we guarantee the
-         * bridge is never in a "already delivered" state when Chrome returns.
          */
         @JavascriptInterface
         public void nativeSignIn(String token) {
-            // ── Step 1: force-clear ALL stale auth state ──────────────────────────
-            // Must happen on the calling (binder) thread, before runOnUiThread,
-            // so that any concurrent ZennKuyBridge check sees the reset first.
+            // Force-clear ALL stale auth state on the binder thread before
+            // runOnUiThread so no concurrent ZennKuyBridge check races us.
             ZennKuyBridge.sTokenDelivered = false;
             sChromeLaunched = false;
 
@@ -505,18 +513,12 @@ public class WebViewManager {
                 "nativeSignIn: cleared sTokenDelivered + sChromeLaunched; token len="
                 + (token != null ? token.length() : 0));
 
-            // ── Step 2: hide WebView synchronously, open Chrome ───────────────────
             WebViewManager.this.baseActivity.runOnUiThread(() -> {
-                // Sync-hide so WebView is invisible before Chrome comes to foreground.
                 WebViewManager.this.hideWebViewSync();
                 android.widget.Toast.makeText(Main.mainApp,
                         "Opening Google sign-in...",
                         android.widget.Toast.LENGTH_SHORT).show();
-                // Open Chrome with Google accountchooser URL.
-                // sChromeLaunched guard inside prevents double-launch.
                 launchGoogleLogin(WebViewManager.this.baseActivity);
-                // Schedule full WebView destruction so libgrowtopia.so does not
-                // encounter a live WebView when the grow:// callback arrives.
                 WebViewManager.this.HideWebView();
             });
         }
@@ -549,11 +551,9 @@ public class WebViewManager {
         }
 
         /**
-         * Called by some versions of the Growtopia login page:
-         * {@code NativeApp.openAsResult(googleOAuthUrl)}
-         *
-         * <p>The page provides the full Google OAuth URL directly (including the
-         * server-generated state parameter).  Open Chrome with that exact URL.
+         * Called by some Growtopia page versions with a full server-generated
+         * Google OAuth URL (includes the correct {@code state} parameter).
+         * Open Chrome with that exact URL so state validation passes.
          */
         @JavascriptInterface
         public void openAsResult(final String url) {
@@ -596,7 +596,7 @@ public class WebViewManager {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()");
             this.listener.OnPageLoaded(url);
         }
 
