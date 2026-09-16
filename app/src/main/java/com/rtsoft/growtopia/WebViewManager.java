@@ -41,6 +41,13 @@ public class WebViewManager {
     static volatile boolean sChromeLaunched = false;
 
     /**
+     * Active Google OAuth client_id for Growtopia Android authentication.
+     * Used as the direct fallback when page JS capture yields nothing.
+     */
+    private static final String GOOGLE_CLIENT_ID =
+        "389994132396-ms0a9ckg28l58o92n33qj52v651152d1.apps.googleusercontent.com";
+
+    /**
      * Redirect URI — Ubisoft's server-side Google callback endpoint.
      * This is stable; it is not a client credential.
      */
@@ -178,11 +185,10 @@ public class WebViewManager {
     // -----------------------------------------------------------------------
 
     /**
-     * Builds a Google OAuth URL from a dynamically-captured client_id and
-     * Ubisoft's session state token, then launches it in Chrome.
+     * Builds a Google OAuth URL and launches it in Chrome.
      *
      * @param state    the 576-char Ubisoft state token from nativeSignIn
-     * @param clientId the Google OAuth client_id harvested from the page JS
+     * @param clientId the Google OAuth client_id (captured or hardcoded)
      */
     private void launchGoogleOAuth(String state, String clientId) {
         if (sChromeLaunched) {
@@ -555,15 +561,13 @@ public class WebViewManager {
         /**
          * Called by the Growtopia dashboard when the user taps a login
          * button. {@code token} is Ubisoft's session {@code state} parameter
-         * (~576 chars). We use it as the {@code state} in the Google OAuth
-         * URL. The actual client_id is taken from what the page itself
-         * exposes (capturedOAuthUrl or capturedClientId).
+         * (~576 chars). We use it as the {@code state} in the Google OAuth URL.
          *
          * <p>Priority order:
          * <ol>
-         *   <li>capturedOAuthUrl — use verbatim (page built it, it is correct)</li>
-         *   <li>capturedClientId — build URL from it + Ubisoft state</li>
-         *   <li>Neither — log error, cannot proceed</li>
+         *   <li>capturedOAuthUrl — page built it, use verbatim</li>
+         *   <li>capturedClientId — from inline JS scan, build URL from it</li>
+         *   <li>GOOGLE_CLIENT_ID — known-active hardcoded fallback</li>
          * </ol>
          */
         @JavascriptInterface
@@ -599,7 +603,7 @@ public class WebViewManager {
                     return;
                 }
 
-                // Priority 2: we captured the client_id from inline JS.
+                // Priority 2: captured client_id from inline JS.
                 String clientId = WebViewManager.this.capturedClientId;
                 if (clientId != null && !clientId.isEmpty()) {
                     Log.d("JSInterface",
@@ -610,12 +614,12 @@ public class WebViewManager {
                     return;
                 }
 
-                // Priority 3: nothing was captured — log and bail.
-                Log.e("JSInterface",
-                    "nativeSignIn: no OAuth URL or client_id captured from page — "
-                    + "check JS injection logs above");
-                AppLogger.warn("JSInterface",
-                    "nativeSignIn: no OAuth credentials available from page");
+                // Priority 3: use known-active hardcoded client_id.
+                Log.d("JSInterface",
+                    "nativeSignIn: no capture from page — using hardcoded client_id fallback");
+                AppLogger.log("JSInterface",
+                    "nativeSignIn: launching Chrome with hardcoded client_id");
+                WebViewManager.this.launchGoogleOAuth(state, GOOGLE_CLIENT_ID);
             });
         }
 
@@ -672,38 +676,38 @@ public class WebViewManager {
         //   4. inline-script scan for client_id pattern → captureGoogleClientId
         //   5. <a href=accounts.google.com> scan → captureFullOAuthUrl
         private static final String HOOK_JS =
-            "(function(){" +
+            "(function(){"+
             // ---- 1. anchor _blank handler (original) ----
-            "var _a=document.getElementsByTagName('a');" +
-            "for(var _v of _a){_v.addEventListener('click',function(e){" +
-            "if(e.currentTarget.target=='_blank'){" +
-            "e.preventDefault();NativeApp.openInBrowser(e.currentTarget.href);" +
-            "return false;}});} " +
+            "var _a=document.getElementsByTagName('a');"+
+            "for(var _v of _a){_v.addEventListener('click',function(e){"+
+            "if(e.currentTarget.target=='_blank'){"+
+            "e.preventDefault();NativeApp.openInBrowser(e.currentTarget.href);"+
+            "return false;}});} "+
             // ---- 2. window.open hook ----
-            "var _o=window.open;" +
-            "window.open=function(u,n,f){" +
-            "if(u&&u.indexOf('accounts.google.com')>=0){" +
-            "try{NativeApp.captureFullOAuthUrl(u);}catch(e){}" +
-            "return{closed:false,close:function(){}};" +
-            "}return _o?_o.apply(this,arguments):null;};" +
+            "var _o=window.open;"+
+            "window.open=function(u,n,f){"+
+            "if(u&&u.indexOf('accounts.google.com')>=0){"+
+            "try{NativeApp.captureFullOAuthUrl(u);}catch(e){}"+
+            "return{closed:false,close:function(){}};"+
+            "}return _o?_o.apply(this,arguments):null;};"+
             // ---- 3. Location.prototype.href setter hook ----
-            "try{var _d=Object.getOwnPropertyDescriptor(Location.prototype,'href');" +
-            "if(_d&&_d.set){var _s=_d.set;" +
-            "Object.defineProperty(Location.prototype,'href',{" +
-            "set:function(u){" +
-            "if(u&&u.indexOf('accounts.google.com')>=0){" +
-            "try{NativeApp.captureFullOAuthUrl(u);}catch(e){}return;}" +
-            "_s.call(this,u);}," +
-            "get:_d.get,configurable:true});}}catch(e){} " +
+            "try{var _d=Object.getOwnPropertyDescriptor(Location.prototype,'href');"+
+            "if(_d&&_d.set){var _s=_d.set;"+
+            "Object.defineProperty(Location.prototype,'href',{"+
+            "set:function(u){"+
+            "if(u&&u.indexOf('accounts.google.com')>=0){"+
+            "try{NativeApp.captureFullOAuthUrl(u);}catch(e){}return;}"+
+            "_s.call(this,u);},"+
+            "get:_d.get,configurable:true});}}catch(e){} "+
             // ---- 4. Scan inline scripts for client_id ----
-            "try{var _t='';" +
-            "document.querySelectorAll('script').forEach(function(s){_t+=s.innerText||'';});" +
-            "var _m=_t.match(/([0-9]+-[a-z0-9]+\\.apps\\.googleusercontent\\.com)/);" +
-            "if(_m)NativeApp.captureGoogleClientId(_m[1]);}catch(e){} " +
+            "try{var _t='';"+
+            "document.querySelectorAll('script').forEach(function(s){_t+=s.innerText||'';});"+
+            "var _m=_t.match(/([0-9]+-[a-z0-9]+\\.apps\\.googleusercontent\\.com)/);"+
+            "if(_m)NativeApp.captureGoogleClientId(_m[1]);}catch(e){} "+
             // ---- 5. Scan <a> tags ----
-            "try{document.querySelectorAll('a[href*=\"accounts.google.com\"]')" +
-            ".forEach(function(a){try{NativeApp.captureFullOAuthUrl(a.href);}catch(e){}});" +
-            "}catch(e){}" +
+            "try{document.querySelectorAll('a[href*=\"accounts.google.com\"]')"+
+            ".forEach(function(a){try{NativeApp.captureFullOAuthUrl(a.href);}catch(e){}});"+
+            "}catch(e){}"+
             "})();";
 
         WebViewClientImpl(Activity a, WebViewCallbackListener l) {
