@@ -106,41 +106,35 @@ public class Main extends SharedActivity {
             String info = data.getQueryParameter("info");
             String token = data.getQueryParameter("token");
             if (info != null || token != null) {
-                // Google OAuth redirect: grow://growtopia?info=...&token=...
-                // Chrome followed the grow:// redirect after Google authentication.
+                // Google OAuth redirect via Chrome: grow://growtopia?token=...&info=...
+                // onNewIntent fires on the UI thread so we can sync-hide here.
                 final String safeInfo  = info  != null ? info  : "";
                 final String safeToken = token != null ? token : "";
-                Log.d("Main", "Google OAuth redirect received, token length=" + safeToken.length()
-                        + " info length=" + safeInfo.length());
+                Log.d("Main", "handleIntent: Google OAuth grow:// received — token len="
+                        + safeToken.length() + " info len=" + safeInfo.length());
 
-                // Mark token as delivered so ZennKuyBridge.startResolving() does not
-                // reload the dashboard URL if the engine retries SignIn() after this.
-                // Check both safeToken and safeInfo — Growtopia sometimes delivers the
-                // ltoken in the "info" param instead of "token".
                 if (!safeToken.isEmpty() || !safeInfo.isEmpty()) {
                     ZennKuyBridge.sTokenDelivered = true;
                 }
 
-                // Dismiss the WebView overlay.
-                // When nativeSignIn("") launches Chrome externally, the grow:// redirect
-                // arrives here via onNewIntent — it bypasses WebViewManager.handleGrowUrl()
-                // which normally calls HideWebView(). Without this call the WebView stays
-                // on top of the game after token delivery.
-                webViewManager.HideWebView();
+                // Sync-hide the WebView BEFORE nativeOnScriptCall.
+                // handleIntent runs on the UI thread (called from onNewIntent).
+                // HideWebView() is async (executor → UI thread) so nativeOnScriptCall
+                // would fire while the WebView is still VISIBLE, causing silent failure.
+                // hideWebViewSync() runs immediately on this thread.
+                webViewManager.hideWebViewSync();
 
-                // Deliver ltoken to the engine via nativeOnScriptCall("nativeSignIn", token).
-                // This is the V3 equivalent of Real Growlauncher's:
-                //   JNICall.notifyValueChanged(5, "google_redirect_callback", payload)
-                // "token" param first, "info" as fallback — Growtopia sometimes delivers
-                // the ltoken in the "info" param instead of "token".
-                // This is the same delivery path used by handleGrowUrl() when the grow://
-                // redirect is intercepted inside the WebView.
                 final String actualToken = !safeToken.isEmpty() ? safeToken : safeInfo;
                 if (!actualToken.isEmpty()) {
+                    Log.d("Main", "handleIntent: calling nativeOnScriptCall(nativeSignIn) — token len=" + actualToken.length());
+                    AppLogger.log("Main", "handleIntent: delivering token to engine — len=" + actualToken.length());
                     webViewManager.nativeOnScriptCall("nativeSignIn", actualToken);
                 } else {
                     Log.w("Main", "handleIntent: grow:// redirect had no usable token — login may fail");
                 }
+
+                // Schedule full WebView destruction after token delivery.
+                webViewManager.HideWebView();
             } else {
                 HandleDeeplink(intent);
             }

@@ -108,6 +108,30 @@ public class WebViewManager {
     }
 
     /**
+     * Synchronously stops loading and hides the WebView on the calling (UI) thread.
+     *
+     * <p>Unlike {@link #HideWebView()} which dispatches through the executor,
+     * this method sets the WebView to GONE immediately so that no active WebView
+     * is present when {@link #nativeOnScriptCall} fires for token delivery.
+     *
+     * <p>This is critical because libgrowtopia.so silently ignores
+     * {@code nativeOnScriptCall("nativeSignIn", token)} when a WebView is alive —
+     * the same reason the spoof path in {@link #LoadURLPost} works
+     * (it calls nativeOnScriptCall before ShowWebView() is ever called).
+     *
+     * <p>Must be called on the UI thread. Call {@link #HideWebView()} afterwards
+     * to schedule full WebView destruction through the normal async path.
+     */
+    void hideWebViewSync() {
+        WebView wv = this.webView;
+        if (wv != null) {
+            wv.stopLoading();
+            wv.loadUrl("about:blank");
+            wv.setVisibility(android.view.View.GONE);
+        }
+    }
+
+    /**
      * Handles {@code grow://} deep-link URLs that arrive at the tail of the Google OAuth chain.
      *
      * <p>This method is called from both the main WebView's {@link WebViewClientImpl} and from
@@ -142,13 +166,18 @@ public class WebViewManager {
                 // the UI-thread runnable below.
                 ZennKuyBridge.sTokenDelivered = true;
                 baseActivity.runOnUiThread(() -> {
-                    AppLogger.log("WebView", "grow:// delivering token (len=" + safeToken.length() + ") — LOGIN SHOULD COMPLETE");
+                    AppLogger.log("WebView", "grow:// delivering token (len=" + safeToken.length() + ") — calling nativeOnScriptCall on UI thread");
                     Log.d("WebView", "grow:// delivering token (len=" + safeToken.length() + ")");
                     android.widget.Toast.makeText(Main.mainApp,
                             "Logging in with google... wait a moment...",
                             android.widget.Toast.LENGTH_SHORT).show();
-                    WebViewManager.this.HideWebView();
+                    // Sync-hide before nativeOnScriptCall — libgrowtopia.so silently
+                    // ignores nativeOnScriptCall("nativeSignIn") while a WebView is
+                    // active. This mirrors the spoof path which fires with no WebView.
+                    WebViewManager.this.hideWebViewSync();
                     WebViewManager.this.nativeOnScriptCall("nativeSignIn", safeToken);
+                    // Schedule full destruction after token is delivered.
+                    WebViewManager.this.HideWebView();
                 });
             } else {
                 AppLogger.warn("WebView", "grow:// had NO token or info param — login will fail! url=" + url);
@@ -436,7 +465,8 @@ public class WebViewManager {
          *       {@code grow://} → {@link Main#onNewIntent} → {@link Main#handleIntent}
          *       extracts the token and delivers it to the engine.</li>
          *   <li><b>Non-empty token</b> — OAuth completed inside the WebView (popup flow).
-         *       Mark delivered and pass the token straight to the game engine.</li>
+         *       Sync-hide the WebView first (so libgrowtopia.so processes the call
+         *       with no active WebView — matching the spoof path), then deliver.</li>
          * </ul>
          */
         @JavascriptInterface
@@ -450,10 +480,12 @@ public class WebViewManager {
                 // V3 path: open Chrome with the Google OAuth URL — no SHA-1 check,
                 //           works on debug-signed APKs.  Chrome follows the redirect
                 //           chain and lands on grow:// when the user picks an account.
-                AppLogger.log("JSInterface", "nativeSignIn(\"\") — launching Chrome for Google OAuth (Real GL equivalent)");
+                AppLogger.log("JSInterface", "nativeSignIn(\"\") — launching Chrome for Google OAuth");
                 Log.d("JSInterface", "nativeSignIn: empty token → opening Chrome with GOOGLE_LOGIN_URL");
-                this.webviewManager.HideWebView();
                 WebViewManager.this.baseActivity.runOnUiThread(() -> {
+                    // Sync-hide the WebView before Chrome opens so it isn't
+                    // visible behind Chrome and can't fire concurrent events.
+                    WebViewManager.this.hideWebViewSync();
                     android.widget.Toast.makeText(Main.mainApp,
                             "Opening Google sign-in...",
                             android.widget.Toast.LENGTH_SHORT).show();
@@ -464,23 +496,33 @@ public class WebViewManager {
                     } catch (Exception e) {
                         Log.e("JSInterface", "nativeSignIn: Chrome launch failed: " + e.getMessage());
                     }
+                    // Schedule full WebView destruction after Chrome opens.
+                    WebViewManager.this.HideWebView();
                 });
                 return;
             }
 
-            // ── Non-empty token: OAuth completed, deliver to game engine ──────────────
+            // ── Non-empty token: OAuth completed (popup flow), deliver to game engine ──
             // Must deliver on the UI thread — nativeOnScriptCall is a JNI call into
             // libgrowtopia.so and the game engine only processes it from the UI/GL thread.
-            // The JS interface callback runs on a background thread; calling nativeOnScriptCall
-            // directly from here silently fails (same reason handleGrowUrl wraps in runOnUiThread).
+            // CRITICAL: hideWebViewSync() must run before nativeOnScriptCall so the
+            // engine sees no active WebView — libgrowtopia.so silently ignores
+            // nativeOnScriptCall("nativeSignIn") while a WebView is alive.
+            // This matches the spoof path in LoadURLPost which calls nativeOnScriptCall
+            // before ShowWebView() is ever created.
             final String safeToken = token;
             ZennKuyBridge.sTokenDelivered = true;
             WebViewManager.this.baseActivity.runOnUiThread(() -> {
                 android.widget.Toast.makeText(
                         Main.mainApp, "Logging in with google... wait a moment...",
                         android.widget.Toast.LENGTH_SHORT).show();
-                WebViewManager.this.HideWebView();
+                // Sync-hide BEFORE the JNI call.
+                WebViewManager.this.hideWebViewSync();
+                AppLogger.log("JSInterface", "nativeSignIn: calling nativeOnScriptCall — token len=" + safeToken.length());
+                Log.d("JSInterface", "nativeSignIn: nativeOnScriptCall(nativeSignIn, len=" + safeToken.length() + ")");
                 WebViewManager.this.nativeOnScriptCall("nativeSignIn", safeToken);
+                // Schedule full WebView destruction after token is delivered.
+                WebViewManager.this.HideWebView();
             });
         }
 
@@ -571,7 +613,7 @@ public class WebViewManager {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})() ");
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {value.addEventListener(\"click\", function(e) {if (e.currentTarget.target == '_blank') {e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false;}})}})()" );
             this.listener.OnPageLoaded(url);
         }
 
@@ -627,11 +669,11 @@ public class WebViewManager {
     }
 
     private boolean isStaleWebViewDataDirectory(String name) {
-        return name.startsWith("app_webview_") && name.matches(".*\\.\\d+$");
+        return name.startsWith("app_webview_") && name.matches(".*\.\\d+$");
     }
 
     private boolean isStaleWebViewCacheDirectory(String name) {
-        return name.startsWith("webview_") && name.matches(".*\\.\\d+$");
+        return name.startsWith("webview_") && name.matches(".*\.\\d+$");
     }
 
     private void safeDeleteDatabase(String name) {
