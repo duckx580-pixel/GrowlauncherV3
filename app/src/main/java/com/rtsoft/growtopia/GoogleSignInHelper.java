@@ -10,10 +10,6 @@ import android.util.Log;
 public class GoogleSignInHelper {
     private static final String TAG = "GoogleSignInHelper";
 
-    static final String CLIENT_ID =
-        "389994132396-4s6ol46f60831v5blfpci7lnmsdnh8br.apps.googleusercontent.com";
-    static final int RC_GOOGLE_SIGNIN = 9001;
-
     Activity mainActivity;
     private final LoginSpoof spoof;
 
@@ -23,21 +19,28 @@ public class GoogleSignInHelper {
     }
 
     public native void OnSignIn(int code, String token);
+
+    /** Implemented in libzennkuy.so — opens Chrome AccountChooser. Never GMS. */
+    public native void SignIn();
+
     public void Init() {}
     public void SignOut() {}
 
-    public void SignIn() {
-        Log.d(TAG, "SignIn: forcing Chrome Google AccountChooser");
-        if (spoof != null) spoof.setGoogleLogs("SignIn: Chrome AccountChooser");
-        ZennKuyBridge.openGoogleAccountPicker();
+    public void handleSignInResult(int requestCode, int resultCode, Intent data) {
+        /* Real Growlauncher ignores RC 1 (GMS / Chrome). Token arrives via grow:// */
     }
-
-    public void handleSignInResult(int requestCode, int resultCode, Intent data) {}
 
     private static final int MAX_DELIVER_RETRIES = 40;
     private final Handler deliverHandler = new Handler(Looper.getMainLooper());
 
     public void deliverResult(int code, String token) {
+        Log.d(TAG, "deliverResult code=" + code + " len=" + (token == null ? 0 : token.length()));
+        if (spoof != null) {
+            if (code == 0 && token != null && !token.isEmpty())
+                spoof.setGoogleLogs("Google OK token=" + token.length());
+            else
+                spoof.setGoogleLogs("Google fail code=" + code);
+        }
         deliverToGl(code, token, 0);
     }
 
@@ -49,7 +52,9 @@ public class GoogleSignInHelper {
             return;
         }
         glView.queueEvent(() -> {
-            try { OnSignIn(code, token); } catch (UnsatisfiedLinkError ignored) {}
+            try { OnSignIn(code, token); } catch (UnsatisfiedLinkError e) {
+                Log.w(TAG, "OnSignIn missing in growtopia so: " + e.getMessage());
+            }
         });
     }
 }
