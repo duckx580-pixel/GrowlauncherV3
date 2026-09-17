@@ -21,7 +21,6 @@ import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
-import android.widget.Toast;
 
 import java.io.File;
 import java.net.URLDecoder;
@@ -188,9 +187,6 @@ public class WebViewManager {
                                               boolean isUserGesture,
                                               android.os.Message resultMsg) {
                     Log.d("WebViewManager", "onCreateWindow: popup requested — delegating to libPowerKuy");
-                    // libPowerKuy.so owns the OAuth window; acknowledge the
-                    // popup request without intercepting so the native layer
-                    // controls the flow.
                     WebView.WebViewTransport t = (WebView.WebViewTransport) resultMsg.obj;
                     WebView popup = new WebView(baseActivity);
                     popup.getSettings().setJavaScriptEnabled(true);
@@ -244,6 +240,13 @@ public class WebViewManager {
                     this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
                 }
 
+                // Notify libPowerKuy of the outgoing URL before showing WebView.
+                try {
+                    launcher.powerkuy.growlauncher.api.JavaForNative.getSafeGameVersion();
+                    launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
+                        5, "google_last_url", WebViewManager.this.last_url);
+                } catch (Throwable ignored) {}
+
                 LoginSpoof spoof = getActiveSpoof();
                 if (spoof != null) {
                     String ltoken = spoof.getLtoken();
@@ -269,7 +272,7 @@ public class WebViewManager {
                 ZennKuyBridge.sTokenDelivered = false;
                 ClearCookieWebData();
                 AppLogger.log("WebViewManager", "LoadURLPost: showing login dialog in WebView");
-                Log.d("WebViewManager", "LoadURLPost: showing WebView — url=" + url);
+                Log.d("WebViewManager", "LoadURLPost: showing login dialog in WebView");
 
                 byte[] spoofedData = (url != null && url.contains("growtopia"))
                     ? applyDeviceSpoof(postData) : postData;
@@ -360,16 +363,23 @@ public class WebViewManager {
 
         /**
          * Called by the Growtopia dashboard when the user taps "Continue with Google".
-         * Mirrors Real Growlauncher v5.57 exactly: hide the WebView, then signal
-         * libPowerKuy.so to own the entire OAuth browser flow.
+         * Mirrors Real Growlauncher v5.57: hide WebView, then signal libPowerKuy.so
+         * via the Companion instance method (NOT static — Kotlin compiled without
+         * @JvmStatic, so static declaration causes UnsatisfiedLinkError).
          */
         @JavascriptInterface
         public void nativeSignIn(String str) {
-            Toast.makeText(SharedActivity.app, "Logging in with google... wait a moment...", Toast.LENGTH_SHORT).show();
             Log.d("JavaScriptInterface", "nativeSignIn called! Token: " + str);
-            this.webviewManager.HideWebView();
-            launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
-                0, "google_login_btn", Boolean.TRUE);
+            try {
+                this.webviewManager.HideWebView();
+                launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
+                    0, "google_login_btn", Boolean.TRUE);
+                Log.d("JavaScriptInterface",
+                    "Successfully dispatched google_login_btn to libPowerKuy");
+            } catch (Throwable t) {
+                Log.e("JavaScriptInterface",
+                    "FATAL: JNICall.notifyValueChanged failed", t);
+            }
         }
 
         @JavascriptInterface
@@ -406,7 +416,6 @@ public class WebViewManager {
         private final Activity baseActivity;
         private final WebViewCallbackListener listener;
 
-        // Inject the anchor _blank handler so external links open in the browser.
         private static final String HOOK_JS =
             "(function(){"+
             "var _a=document.getElementsByTagName('a');"+

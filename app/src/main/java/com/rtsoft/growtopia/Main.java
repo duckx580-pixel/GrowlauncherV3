@@ -61,8 +61,8 @@ public class Main extends SharedActivity {
     /**
      * Handles the grow:// OAuth redirect from Chrome.
      * Forwards the redirect query parameters to libPowerKuy.so via
-     * notifyValueChanged(5, "google_redirect_callback", encoded) —
-     * mirroring Real Growlauncher v5.57 exactly.
+     * notifyValueChanged(5, "google_redirect_callback", encoded).
+     * Mirrors Real Growlauncher v5.57 exactly.
      */
     private void handleIntent(Intent intent) {
         if (intent == null) return;
@@ -76,13 +76,14 @@ public class Main extends SharedActivity {
         try {
             String info  = data.getQueryParameter("info");
             String token = data.getQueryParameter("token");
-            String encoded =
+            String callbackPayload =
                 "info="  + URLEncoder.encode(info  != null ? info  : "", "UTF-8") +
                 "&token=" + URLEncoder.encode(token != null ? token : "", "UTF-8");
             launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
-                5, "google_redirect_callback", encoded);
-        } catch (Exception e) {
-            Log.e("Main", "Error handling redirect intent", e);
+                5, "google_redirect_callback", callbackPayload);
+            Log.d("Main", "Dispatched google_redirect_callback successfully");
+        } catch (Throwable t) {
+            Log.e("Main", "Failed to forward google_redirect_callback", t);
         }
     }
 
@@ -162,10 +163,6 @@ public class Main extends SharedActivity {
         }
     }
 
-    /**
-     * Dispatches the Google Sign-In SDK result to GoogleSignInHelper.
-     * RC 1 is excluded — that is the Chrome browser launch request code.
-     */
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);

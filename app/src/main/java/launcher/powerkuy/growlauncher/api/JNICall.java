@@ -5,13 +5,16 @@ package launcher.powerkuy.growlauncher.api;
  * libPowerKuy.so:
  *   Java_launcher_powerkuy_growlauncher_api_JNICall_00024Companion_notifyValueChanged
  *
- * libPowerKuy.so handles the full Google OAuth browser invocation once
- * notifyValueChanged(0, "google_login_btn", Boolean.TRUE) is fired.
- * The redirect callback arrives as notifyValueChanged(5, "google_redirect_callback", ...).
+ * IMPORTANT: notifyValueChanged must NOT be declared static.
+ * libPowerKuy.so was compiled from Kotlin without @JvmStatic, so the native
+ * symbol expects a jobject receiver (instance method on Companion), not a
+ * jclass. Declaring it static causes a silent UnsatisfiedLinkError at
+ * runtime and the call silently no-ops on the JS thread.
  */
 public class JNICall {
     public static class Companion {
-        public static native Object notifyValueChanged(int type, String key, Object value);
+        public native Object notifyValueChanged(int type, String key, Object value);
     }
+
     public static final Companion Companion = new Companion();
 }
