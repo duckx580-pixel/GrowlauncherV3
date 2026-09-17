@@ -1,11 +1,9 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(growtopia_launcher_native)
 
-# ── gtcrash (existing crash handler) ─────────────────────────────────────────
 add_library(gtcrash SHARED crash_handler.cpp)
 target_link_libraries(gtcrash log)
 
-# ── ImGui sources ─────────────────────────────────────────────────────────────
 set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/imgui)
 
 add_library(imgui STATIC
@@ -23,8 +21,7 @@ target_include_directories(imgui PUBLIC
 target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_ES2)
 target_compile_options(imgui PRIVATE -O2)
 
-# ── libzennkuy ────────────────────────────────────────────────────────────────
-add_library(zennkuy SHARED zennkuy.cpp)
+add_library(zennkuy SHARED zennkuy.cpp google_jni.cpp)
 
 target_include_directories(zennkuy PRIVATE
     ${IMGUI_DIR}
