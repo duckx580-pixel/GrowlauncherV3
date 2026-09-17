@@ -15,6 +15,11 @@ public final class ZennKuyBridge {
     public static final String DASHBOARD_URL =
         "https://login.growtopiagame.com/player/login/dashboard?valKey=40db4045f2d8c572efe8c4a060605726";
 
+    /** Chrome account picker, then continue into Growtopia web login. */
+    public static final String GOOGLE_ACCOUNT_CHOOSER_URL =
+        "https://accounts.google.com/AccountChooser?continue=" +
+        "https%3A%2F%2Flogin.growtopiagame.com%2Fplayer%2Flogin%2Fdashboard%3FvalKey%3D40db4045f2d8c572efe8c4a060605726";
+
     private static LoginSpoof spoof() {
         if (Main.mainApp == null) return null;
         return new LoginSpoof(Main.mainApp);
@@ -25,7 +30,6 @@ public final class ZennKuyBridge {
             LoginSpoof s = spoof();
             return s != null ? s.generateMac() : "02:00:00:00:00:00";
         } catch (Exception e) {
-            Log.e(TAG, "generateMac: " + e.getMessage());
             return "02:00:00:00:00:00";
         }
     }
@@ -35,7 +39,6 @@ public final class ZennKuyBridge {
             LoginSpoof s = spoof();
             return s != null ? s.generateRid() : "";
         } catch (Exception e) {
-            Log.e(TAG, "generateRid: " + e.getMessage());
             return "";
         }
     }
@@ -45,88 +48,51 @@ public final class ZennKuyBridge {
             LoginSpoof s = spoof();
             return s != null ? s.generateWk() : "";
         } catch (Exception e) {
-            Log.e(TAG, "generateWk: " + e.getMessage());
             return "";
         }
     }
 
+    /** Called from Java SignIn and from libzennkuy JNICall hook. */
     public static void startResolving() {
-        try {
-            if (Main.mainApp == null) return;
-            if (sTokenDelivered) {
-                Log.d(TAG, "startResolving: token already delivered — skipping dashboard redirect");
-                return;
-            }
-            LoginSpoof spoof = spoofIfEnabled();
-            if (spoof != null) {
-                String ltoken = spoof.getLtoken();
-                if (!ltoken.isEmpty()) {
-                    injectLtoken(ltoken);
-                    return;
-                }
-                String refreshToken = spoof.getRefreshToken();
-                if (!refreshToken.isEmpty()) {
-                    spoof.exchangeStoredRefreshToken(new LoginSpoof.ExchangeCallback() {
-                        @Override public void onSuccess(String lt) { injectLtoken(lt); }
-                        @Override public void onFailure(String msg, String raw) { triggerWebViewLogin(); }
-                    });
-                    return;
-                }
-            }
-            WebViewManager wvm = Main.mainApp.webViewManager;
-            if (wvm != null && wvm.IsVisible()) {
-                return;
-            }
-            openChrome(Main.mainApp, DASHBOARD_URL);
-        } catch (Exception e) {
-            Log.e(TAG, "startResolving: " + e.getMessage());
-        }
+        openGoogleAccountPicker();
     }
 
-    private static LoginSpoof spoofIfEnabled() {
-        try {
-            if (Main.mainApp == null) return null;
-            LoginSpoof s = new LoginSpoof(Main.mainApp);
-            return s.isEnabled() ? s : null;
-        } catch (Exception e) {
-            return null;
+    public static void openGoogleAccountPicker() {
+        Activity act = Main.mainApp;
+        if (act == null) {
+            Log.e(TAG, "openGoogleAccountPicker: mainApp null");
+            return;
         }
-    }
-
-    private static void injectLtoken(String ltoken) {
-        try {
-            Main.mainApp.runOnUiThread(() -> {
-                WebViewManager wvm = Main.mainApp.webViewManager;
-                if (wvm == null) return;
-                wvm.nativeOnScriptCall("nativeSignIn", ltoken);
-            });
-        } catch (Exception e) {
-            Log.e(TAG, "injectLtoken: " + e.getMessage());
-        }
+        openChrome(act, GOOGLE_ACCOUNT_CHOOSER_URL);
     }
 
     public static void openChrome(Activity activity, String url) {
         if (activity == null || url == null || url.isEmpty()) return;
-        activity.runOnUiThread(() -> {
+        Runnable launch = () -> {
             try {
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                intent.addCategory(Intent.CATEGORY_BROWSABLE);
-                intent.setPackage("com.android.chrome");
+                Uri uri = Uri.parse(url);
+                Intent chrome = new Intent(Intent.ACTION_VIEW, uri);
+                chrome.addCategory(Intent.CATEGORY_BROWSABLE);
+                chrome.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                chrome.setPackage("com.android.chrome");
                 try {
-                    activity.startActivityForResult(intent, 1);
+                    activity.startActivity(chrome);
                     Log.d(TAG, "openChrome: chrome " + url);
-                } catch (Exception chromeMissing) {
-                    intent.setPackage(null);
-                    activity.startActivityForResult(intent, 1);
-                    Log.d(TAG, "openChrome: default browser " + url);
-                }
+                    return;
+                } catch (Exception ignored) {}
+                Intent any = new Intent(Intent.ACTION_VIEW, uri);
+                any.addCategory(Intent.CATEGORY_BROWSABLE);
+                any.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                activity.startActivity(any);
+                Log.d(TAG, "openChrome: default browser " + url);
             } catch (Exception e) {
                 Log.e(TAG, "openChrome failed: " + e.getMessage());
             }
-        });
-    }
-
-    private static void triggerWebViewLogin() {
-        openChrome(Main.mainApp, DASHBOARD_URL);
+        };
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            launch.run();
+        } else {
+            activity.runOnUiThread(launch);
+        }
     }
 }
