@@ -1,19 +1,22 @@
 package launcher.powerkuy.growlauncher.api;
 
-/**
- * Java-side stub for the native methods exported by libPowerKuy.so
- * under the JavaForNative symbol group. These are called to initialise
- * and query the PowerKuy layer before the login WebView is shown.
- */
+import com.gentz.launcher.api.GentzGoogle;
+
 public class JavaForNative {
-    public static native String getSafeGameVersion();
-    public static native boolean isLtokenSpoofActive();
-    public static native String getSupportedGameVersion();
-    public static native void shutdown();
-    public static native void initialize();
+    public static String getSafeGameVersion() {
+        return GentzGoogle.getSafeGameVersion();
+    }
+    public static boolean isLtokenSpoofActive() {
+        return GentzGoogle.isLtokenSpoofActive();
+    }
+    public static String getSupportedGameVersion() {
+        return GentzGoogle.getSafeGameVersion();
+    }
+    public static void shutdown() {}
+    public static void initialize() {}
 
     public static class Configuration {
-        public static native String getJsonConfiguration();
-        public static native void setJsonConfiguration(String config);
+        public static String getJsonConfiguration() { return "{}"; }
+        public static void setJsonConfiguration(String config) {}
     }
 }
