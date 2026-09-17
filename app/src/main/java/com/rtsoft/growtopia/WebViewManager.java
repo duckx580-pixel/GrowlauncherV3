@@ -84,7 +84,6 @@ public class WebViewManager {
 
     private void DestroyWebView() {
         if (this.webView == null) return;
-        Log.i(SharedActivity.PackageName, "Destroying WebView.");
         ViewGroup parent = (ViewGroup) this.webView.getParent();
         if (parent != null) parent.removeView(this.webView);
         this.webView.stopLoading();
@@ -106,16 +105,11 @@ public class WebViewManager {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Device spoof injection
-    // -----------------------------------------------------------------------
-
     private byte[] applyDeviceSpoof(byte[] postData) {
         if (postData == null || postData.length == 0) return postData;
         try {
             DeviceSpoofer sp = new DeviceSpoofer(baseActivity);
             String body = new String(postData, StandardCharsets.ISO_8859_1);
-
             Map<String, String> params = new LinkedHashMap<>();
             for (String pair : body.split("&")) {
                 int eq = pair.indexOf('=');
@@ -124,13 +118,11 @@ public class WebViewManager {
                 String val = URLDecoder.decode(pair.substring(eq + 1),  "UTF-8");
                 params.put(key, val);
             }
-
             boolean changed = false;
             if (params.containsKey("mac")) { params.put("mac", sp.getMac()); changed = true; }
             if (params.containsKey("rid")) { params.put("rid", sp.getRid()); changed = true; }
             if (params.containsKey("gid")) { params.put("gid", sp.getGid()); changed = true; }
             if (!changed) return postData;
-
             StringBuilder sb = new StringBuilder();
             for (Map.Entry<String, String> e : params.entrySet()) {
                 if (sb.length() > 0) sb.append('&');
@@ -138,28 +130,17 @@ public class WebViewManager {
                 sb.append('=');
                 sb.append(URLEncoder.encode(e.getValue(), "UTF-8"));
             }
-            byte[] modified = sb.toString().getBytes(StandardCharsets.ISO_8859_1);
-            Log.d("WebViewManager", "applyDeviceSpoof: injected mac/rid/gid into POST body");
-            AppLogger.log("WebViewManager", "applyDeviceSpoof: device identifiers replaced");
-            return modified;
+            return sb.toString().getBytes(StandardCharsets.ISO_8859_1);
         } catch (Exception e) {
-            Log.e("WebViewManager",
-                "applyDeviceSpoof: failed to parse POST body — using original: " + e.getMessage());
             return postData;
         }
     }
 
-    // -----------------------------------------------------------------------
-    // WebView lifecycle
-    // -----------------------------------------------------------------------
-
     public synchronized void ShowWebView() {
         if (Looper.getMainLooper().getThread() != Thread.currentThread()) return;
-
         if (this.webView == null) {
             WebView wv = new WebView(this.baseActivity);
             this.webView = wv;
-
             wv.setWebViewClient(new WebViewClientImpl(this.baseActivity,
                 new WebViewCallbackListener() {
                     @Override public void OnError(int e) {
@@ -169,54 +150,20 @@ public class WebViewManager {
                         WebViewManager.this.nativeOnPageLoaded(url);
                     }
                 }));
-
             WebSettings s = wv.getSettings();
             s.setJavaScriptEnabled(true);
             s.setLoadsImagesAutomatically(true);
             s.setDomStorageEnabled(true);
             s.setSupportMultipleWindows(true);
             s.setJavaScriptCanOpenWindowsAutomatically(true);
-
             wv.setBackgroundColor(0);
-            wv.setScrollBarStyle(android.view.View.SCROLLBARS_INSIDE_OVERLAY);
             wv.addJavascriptInterface(new WebViewJavascriptInterface(this), "NativeApp");
-
-            wv.setWebChromeClient(new WebChromeClient() {
-                @Override
-                public boolean onCreateWindow(WebView view, boolean isDialog,
-                                              boolean isUserGesture,
-                                              android.os.Message resultMsg) {
-                    Log.d("WebViewManager", "onCreateWindow: popup requested — delegating to libPowerKuy");
-                    WebView.WebViewTransport t = (WebView.WebViewTransport) resultMsg.obj;
-                    WebView popup = new WebView(baseActivity);
-                    popup.getSettings().setJavaScriptEnabled(true);
-                    t.setWebView(popup);
-                    resultMsg.sendToTarget();
-                    return true;
-                }
-            });
-
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT);
             this.baseActivity.addContentView(wv, lp);
-            Log.d("WebViewManager", "ShowWebView: WebView attached via addContentView");
         }
-
-        if (this.webView.getParent() == null) {
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT);
-            this.baseActivity.addContentView(this.webView, lp);
-            Log.d("WebViewManager", "ShowWebView: WebView re-attached");
-        }
-
-        this.webView.setBackgroundColor(0);
-        this.webView.setLayoutParams(new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT));
         this.webView.setVisibility(android.view.View.VISIBLE);
-        Log.d("WebViewManager", "ShowWebView: visibility VISIBLE");
     }
 
     public void LoadURL(final String url, final boolean allowExternal) {
@@ -239,19 +186,10 @@ public class WebViewManager {
                 if (postData != null) {
                     this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
                 }
-
-                // Notify libPowerKuy of the outgoing URL before showing WebView.
-                try {
-                    launcher.powerkuy.growlauncher.api.JavaForNative.getSafeGameVersion();
-                    launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
-                        5, "google_last_url", WebViewManager.this.last_url);
-                } catch (Throwable ignored) {}
-
                 LoginSpoof spoof = getActiveSpoof();
                 if (spoof != null) {
                     String ltoken = spoof.getLtoken();
                     if (!ltoken.isEmpty()) {
-                        AppLogger.log("WebViewManager", "ltoken spoof active — injecting");
                         nativeOnScriptCall("nativeSignIn", ltoken);
                         return;
                     }
@@ -268,12 +206,8 @@ public class WebViewManager {
                         return;
                     }
                 }
-
                 ZennKuyBridge.sTokenDelivered = false;
                 ClearCookieWebData();
-                AppLogger.log("WebViewManager", "LoadURLPost: showing login dialog in WebView");
-                Log.d("WebViewManager", "LoadURLPost: showing login dialog in WebView");
-
                 byte[] spoofedData = (url != null && url.contains("growtopia"))
                     ? applyDeviceSpoof(postData) : postData;
                 showAndPostUrl(url, spoofedData);
@@ -333,7 +267,6 @@ public class WebViewManager {
                 wv.stopLoading();
                 wv.setVisibility(android.view.View.GONE);
                 wv.loadUrl("about:blank");
-                wv.clearHistory();
                 DestroyWebView();
             })
         );
@@ -348,49 +281,27 @@ public class WebViewManager {
                 this.to_render = "";
                 return;
             }
-            this.webView.loadUrl(
-                "javascript:NativeApp.pageContent(document.body.innerText)");
+            this.webView.loadUrl("javascript:NativeApp.pageContent(document.body.innerText)");
         });
     }
-
-    // -----------------------------------------------------------------------
-    // JS interface
-    // -----------------------------------------------------------------------
 
     public class WebViewJavascriptInterface {
         WebViewManager webviewManager;
         WebViewJavascriptInterface(WebViewManager wvm) { this.webviewManager = wvm; }
 
-        /**
-         * Called by the Growtopia dashboard when the user taps "Continue with Google".
-         * Mirrors Real Growlauncher v5.57: hide WebView, then signal libPowerKuy.so
-         * via the Companion instance method (NOT static — Kotlin compiled without
-         * @JvmStatic, so static declaration causes UnsatisfiedLinkError).
-         */
         @JavascriptInterface
         public void nativeSignIn(String str) {
             Log.d("JavaScriptInterface", "nativeSignIn called! Token: " + str);
-            try {
-                this.webviewManager.HideWebView();
-                launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
-                    0, "google_login_btn", Boolean.TRUE);
-                Log.d("JavaScriptInterface",
-                    "Successfully dispatched google_login_btn to libPowerKuy");
-            } catch (Throwable t) {
-                Log.e("JavaScriptInterface",
-                    "FATAL: JNICall.notifyValueChanged failed", t);
-            }
+            this.webviewManager.nativeOnScriptCall("nativeSignIn", str);
         }
 
         @JavascriptInterface
         public void onloginselection(String token) {
-            Log.d("JSInterface", "onloginselection: " + token);
             this.webviewManager.nativeOnScriptCall("onloginselection", token);
         }
 
         @JavascriptInterface
         public void onnameselection(String token) {
-            Log.d("JSInterface", "onnameselection: " + token);
             this.webviewManager.nativeOnScriptCall("onnameselection", token);
         }
 
@@ -401,29 +312,15 @@ public class WebViewManager {
 
         @JavascriptInterface
         public void openInBrowser(final String url) {
-            Log.d("JSInterface", "openInBrowser: " + url);
             WebViewManager.this.baseActivity.runOnUiThread(() ->
                 WebViewManager.this.baseActivity.startActivity(
                     new Intent(Intent.ACTION_VIEW, Uri.parse(url))));
         }
     }
 
-    // -----------------------------------------------------------------------
-    // WebViewClient
-    // -----------------------------------------------------------------------
-
     private class WebViewClientImpl extends WebViewClient {
         private final Activity baseActivity;
         private final WebViewCallbackListener listener;
-
-        private static final String HOOK_JS =
-            "(function(){"+
-            "var _a=document.getElementsByTagName('a');"+
-            "for(var _v of _a){_v.addEventListener('click',function(e){"+
-            "if(e.currentTarget.target=='_blank'){"+
-            "e.preventDefault();NativeApp.openInBrowser(e.currentTarget.href);"+
-            "return false;}});}" +
-            "})();";
 
         WebViewClientImpl(Activity a, WebViewCallbackListener l) {
             this.baseActivity = a;
@@ -432,17 +329,31 @@ public class WebViewManager {
 
         @Override
         public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
-            return false;
+            return shouldOverrideUrlLoading(v, req.getUrl() == null ? "" : req.getUrl().toString());
         }
 
         @Override @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView v, String url) {
-            return false;
+            try {
+                Uri orig = Uri.parse(WebViewManager.originalURL == null ? "" : WebViewManager.originalURL);
+                Uri next = Uri.parse(url == null ? "" : url);
+                String oh = orig.getHost();
+                String nh = next.getHost();
+                if (!WebViewManager.this.allowExternalLinks || oh == null || nh == null || oh.equals(nh)) {
+                    v.loadUrl(url);
+                    return true;
+                }
+                this.baseActivity.startActivity(new Intent(Intent.ACTION_VIEW, next));
+                return true;
+            } catch (Exception e) {
+                Log.e("WebView", "shouldOverrideUrlLoading: " + e.getMessage());
+                return false;
+            }
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:" + HOOK_JS);
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {\nvalue.addEventListener(\"click\", function(e) {  if (e.currentTarget.target == '_blank') { e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false; } });}})()");
             this.listener.OnPageLoaded(url);
         }
 
@@ -457,18 +368,7 @@ public class WebViewManager {
             super.onReceivedSslError(v, h, err);
             this.listener.OnError(err.getPrimaryError());
         }
-
-        @Override
-        public void onReceivedHttpError(WebView v, WebResourceRequest req,
-                                        WebResourceResponse resp) {
-            super.onReceivedHttpError(v, req, resp);
-            this.listener.OnError(resp.getStatusCode());
-        }
     }
-
-    // -----------------------------------------------------------------------
-    // Cleanup
-    // -----------------------------------------------------------------------
 
     private void clearWebViewDirectories() {
         File dataDir = this.baseActivity.getDataDir();
@@ -477,31 +377,15 @@ public class WebViewManager {
             File[] files = dataDir.listFiles();
             if (files != null)
                 for (File f : files)
-                    if (isStaleWebViewDataDirectory(f.getName()))
+                    if (f.getName().startsWith("app_webview_"))
                         deleteRecursively(f);
         }
         if (cacheDir != null) {
             File[] files = cacheDir.listFiles();
             if (files != null)
                 for (File f : files)
-                    if (isStaleWebViewCacheDirectory(f.getName()))
+                    if (f.getName().startsWith("webview_"))
                         deleteRecursively(f);
-        }
-        safeDeleteDatabase("webview.db");
-        safeDeleteDatabase("webviewCache.db");
-    }
-
-    private boolean isStaleWebViewDataDirectory(String n) {
-        return n.startsWith("app_webview_") && n.matches(".*\\.\\d+$");
-    }
-    private boolean isStaleWebViewCacheDirectory(String n) {
-        return n.startsWith("webview_") && n.matches(".*\\.\\d+$");
-    }
-
-    private void safeDeleteDatabase(String name) {
-        try { this.baseActivity.deleteDatabase(name); }
-        catch (Throwable t) {
-            Log.e("WebViewManager", "Failed to delete database: " + name, t);
         }
     }
 
@@ -514,10 +398,6 @@ public class WebViewManager {
                 for (File child : children)
                     if (!deleteRecursively(child)) ok = false;
         }
-        if (!file.delete()) {
-            Log.w("WebViewManager", "Failed to delete: " + file.getAbsolutePath());
-            return false;
-        }
-        return ok;
+        return file.delete() && ok;
     }
 }
