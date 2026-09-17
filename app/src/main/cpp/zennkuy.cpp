@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <string>
 #include <atomic>
+#include <dlfcn.h>
 
 #include "got_hook.h"
 
@@ -20,23 +21,13 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Globals
-// ──────────────────────────────────────────────────────────────────────────────
-
 static JavaVM* g_jvm = nullptr;
-static jobject g_bridge_class = nullptr;   // global ref to ZennKuyBridge class
-
+static jobject g_bridge_class = nullptr;
 static std::atomic<bool> g_imgui_ready{false};
 static std::atomic<bool> g_menu_open{false};
 
-// eglSwapBuffers original pointer
 typedef EGLBoolean (*eglSwapBuffers_t)(EGLDisplay, EGLSurface);
 static eglSwapBuffers_t g_orig_eglSwapBuffers = nullptr;
-
-// ──────────────────────────────────────────────────────────────────────────────
-// JNI helpers
-// ──────────────────────────────────────────────────────────────────────────────
 
 static JNIEnv* get_env() {
     JNIEnv* env = nullptr;
@@ -52,67 +43,36 @@ static void call_bridge(const char* method) {
     if (env->ExceptionCheck()) env->ExceptionClear();
 }
 
-static std::string call_bridge_string(const char* method) {
-    JNIEnv* env = get_env();
-    if (!env || !g_bridge_class) return "";
-    jmethodID mid = env->GetStaticMethodID((jclass)g_bridge_class, method, "()Ljava/lang/String;");
-    if (!mid) return "";
-    jstring jstr = (jstring)env->CallStaticObjectMethod((jclass)g_bridge_class, mid);
-    if (!jstr) return "";
-    const char* cstr = env->GetStringUTFChars(jstr, nullptr);
-    std::string result(cstr);
-    env->ReleaseStringUTFChars(jstr, cstr);
-    env->DeleteLocalRef(jstr);
-    return result;
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// ImGui setup / teardown
-// ──────────────────────────────────────────────────────────────────────────────
-
 static void imgui_init() {
     if (g_imgui_ready) return;
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = nullptr;                       // no imgui.ini on disk
-    io.DisplaySize = ImVec2(1080.0f, 2400.0f);     // reasonable default, updated per frame
-
+    io.IniFilename = nullptr;
+    io.DisplaySize = ImVec2(1080.0f, 2400.0f);
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
     style.WindowRounding = 8.0f;
     style.FrameRounding  = 4.0f;
     style.Alpha          = 0.92f;
-    style.ScaleAllSizes(2.5f);                     // scale for phone DPI
+    style.ScaleAllSizes(2.5f);
     io.FontGlobalScale = 2.0f;
-
     ImGui_ImplOpenGL3_Init("#version 100");
     g_imgui_ready = true;
     LOGI("ImGui initialised");
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Menu state
-// ──────────────────────────────────────────────────────────────────────────────
-
-static char g_mac[32]  = "02:00:00:00:00:00";
-static char g_rid[64]  = "";
-static char g_wk[64]   = "";
-static int  g_tab      = 0;
+static int g_tab = 0;
 
 static void render_menu() {
     ImGuiIO& io = ImGui::GetIO();
-
-    // Small toggle button in top-right corner
     float btn_sz = 60.0f;
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - btn_sz - 8, 8), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(btn_sz, btn_sz), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.7f);
-    ImGuiWindowFlags tog_flags = ImGuiWindowFlags_NoDecoration |
-                                  ImGuiWindowFlags_NoMove       |
-                                  ImGuiWindowFlags_NoNav        |
-                                  ImGuiWindowFlags_NoSavedSettings;
-    ImGui::Begin("##toggle", nullptr, tog_flags);
+    ImGui::Begin("##toggle", nullptr,
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings);
     if (ImGui::Button("ZK", ImVec2(btn_sz - 16, btn_sz - 16)))
         g_menu_open = !g_menu_open.load();
     ImGui::End();
@@ -120,7 +80,7 @@ static void render_menu() {
     if (!g_menu_open) return;
 
     ImGui::SetNextWindowPos(ImVec2(20, 80), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - 40, 620), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - 40, 360), ImGuiCond_Once);
     ImGui::Begin("ZennKuy", nullptr,
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse);
 
@@ -130,109 +90,49 @@ static void render_menu() {
         if (ImGui::BeginTabItem(tabs[i])) { g_tab = i; ImGui::EndTabItem(); }
     }
     ImGui::EndTabBar();
-
     ImGui::Separator();
 
     if (g_tab == 0) {
-        ImGui::TextWrapped("Fix Google Sign-In Error 10 via ltoken flow.");
+        ImGui::TextWrapped("Error 10 fix: open Google in Chrome. MAC / RID / GID live in Settings.");
         ImGui::Spacing();
-
-        ImGui::Text("MAC:"); ImGui::SameLine();
-        ImGui::SetNextItemWidth(-100);
-        ImGui::InputText("##mac", g_mac, sizeof(g_mac));
-        ImGui::SameLine();
-        if (ImGui::Button("Rand##mac")) {
-            std::string v = call_bridge_string("generateMac");
-            if (!v.empty()) snprintf(g_mac, sizeof(g_mac), "%s", v.c_str());
-        }
-
-        ImGui::Text("RID:"); ImGui::SameLine();
-        ImGui::SetNextItemWidth(-100);
-        ImGui::InputText("##rid", g_rid, sizeof(g_rid));
-        ImGui::SameLine();
-        if (ImGui::Button("Rand##rid")) {
-            std::string v = call_bridge_string("generateRid");
-            if (!v.empty()) snprintf(g_rid, sizeof(g_rid), "%s", v.c_str());
-        }
-
-        ImGui::Text(" WK:"); ImGui::SameLine();
-        ImGui::SetNextItemWidth(-100);
-        ImGui::InputText("##wk", g_wk, sizeof(g_wk));
-        ImGui::SameLine();
-        if (ImGui::Button("Rand##wk")) {
-            std::string v = call_bridge_string("generateWk");
-            if (!v.empty()) snprintf(g_wk, sizeof(g_wk), "%s", v.c_str());
-        }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
-            "Step: tap Start Resolving, sign in with Google,\nthe game will log in automatically.");
+            "Tap Start Resolving to pick a Google account.");
         ImGui::Spacing();
-
-        ImVec2 btn_full(-1, 70);
-        if (ImGui::Button("Start Resolving", btn_full)) {
+        if (ImGui::Button("Start Resolving", ImVec2(-1, 70))) {
             call_bridge("startResolving");
         }
     } else {
-        ImGui::Text("ZennKuy - Growtopia Launcher Helper");
-        ImGui::Spacing();
-        ImGui::Text("Google login fix (Error 10)");
-        ImGui::Text("ImGui overlay via eglSwapBuffers hook");
-        ImGui::Spacing();
-        ImGui::TextDisabled("Repo: duckx580-pixel/growlauncherv3");
+        ImGui::Text("ZennKuy");
+        ImGui::TextWrapped("Spoof fields were removed from this menu. Use launcher Settings.");
     }
-
     ImGui::End();
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// eglSwapBuffers hook
-// ──────────────────────────────────────────────────────────────────────────────
-
 static EGLBoolean my_eglSwapBuffers(EGLDisplay display, EGLSurface surface) {
-    if (!g_imgui_ready) {
-        imgui_init();
-    }
-
+    if (!g_imgui_ready) imgui_init();
     if (g_imgui_ready) {
-        // Query actual surface dimensions each frame
         EGLint w = 0, h = 0;
         eglQuerySurface(display, surface, EGL_WIDTH,  &w);
         eglQuerySurface(display, surface, EGL_HEIGHT, &h);
-
         ImGuiIO& io = ImGui::GetIO();
         if (w > 0 && h > 0) io.DisplaySize = ImVec2((float)w, (float)h);
-
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplAndroid_NewFrame();
         ImGui::NewFrame();
-
         render_menu();
-
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     }
-
     return g_orig_eglSwapBuffers(display, surface);
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// JNI exports
-// ──────────────────────────────────────────────────────────────────────────────
-
 extern "C" {
 
-// Called from Main.dispatchTouchEvent
 JNIEXPORT void JNICALL
 Java_com_rtsoft_growtopia_Main_nativeOnTouch(JNIEnv*, jclass,
     jint action, jfloat x, jfloat y)
 {
     if (!g_imgui_ready) return;
-    AInputEvent* dummy = nullptr;
-    // Forward raw coords to imgui_impl_android helper
     ImGuiIO& io = ImGui::GetIO();
     switch (action & AMOTION_EVENT_ACTION_MASK) {
         case AMOTION_EVENT_ACTION_DOWN:
@@ -251,7 +151,6 @@ Java_com_rtsoft_growtopia_Main_nativeOnTouch(JNIEnv*, jclass,
     }
 }
 
-// Called from Main.onTouchEventResult so Growtopia still gets un-consumed events
 JNIEXPORT jboolean JNICALL
 Java_com_rtsoft_growtopia_Main_isImGuiCapturingInput(JNIEnv*, jclass)
 {
@@ -263,8 +162,6 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     g_jvm = vm;
     JNIEnv* env = nullptr;
     if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) return -1;
-
-    // Cache global ref to ZennKuyBridge class
     jclass cls = env->FindClass("com/rtsoft/growtopia/ZennKuyBridge");
     if (cls) {
         g_bridge_class = env->NewGlobalRef(cls);
@@ -274,19 +171,15 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
         LOGE("ZennKuyBridge class not found");
         env->ExceptionClear();
     }
-
-    // growtopia is already loaded (NativeLibraries loads it before zennkuy).
-    // Try the GOT hook immediately; retry a few times in case of a race.
     void* old = nullptr;
     for (int attempt = 0; attempt < 5 && !old; attempt++) {
-        if (attempt > 0) usleep(50000); // 50ms between retries
+        if (attempt > 0) usleep(50000);
         old = got_hook("libgrowtopia.so", "eglSwapBuffers", (void*)my_eglSwapBuffers);
     }
     if (old) {
         g_orig_eglSwapBuffers = (eglSwapBuffers_t)old;
         LOGI("eglSwapBuffers hooked in libgrowtopia.so");
     } else {
-        // Fallback: hook in libEGL.so (intercepts all callers, not just growtopia)
         old = got_hook("libEGL.so", "eglSwapBuffers", (void*)my_eglSwapBuffers);
         if (old) {
             g_orig_eglSwapBuffers = (eglSwapBuffers_t)old;
@@ -296,7 +189,6 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
             LOGE("GOT hook failed; ImGui overlay disabled");
         }
     }
-
     return JNI_VERSION_1_6;
 }
 
