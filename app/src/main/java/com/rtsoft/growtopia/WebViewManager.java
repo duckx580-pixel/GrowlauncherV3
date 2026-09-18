@@ -60,13 +60,6 @@ public class WebViewManager {
         return wv != null && wv.getVisibility() == android.view.View.VISIBLE;
     }
 
-    private void ClearCookieWebData() {
-        CookieManager cm = CookieManager.getInstance();
-        cm.removeAllCookies(null);
-        cm.flush();
-        WebStorage.getInstance().deleteAllData();
-    }
-
     private void DestroyWebView() {
         if (this.webView == null) return;
         ViewGroup parent = (ViewGroup) this.webView.getParent();
@@ -148,8 +141,6 @@ public class WebViewManager {
                 String ltoken = spoof.getLtoken();
                 if (!ltoken.isEmpty()) { nativeOnScriptCall("nativeSignIn", ltoken); return; }
             }
-            ZennKuyBridge.sTokenDelivered = false;
-            ClearCookieWebData();
             byte[] data = (url != null && url.contains("growtopia")) ? applyDeviceSpoof(postData) : postData;
             ShowWebView();
             originalURL = url;
@@ -213,11 +204,10 @@ public class WebViewManager {
         @JavascriptInterface
         public void nativeSignIn(String str) {
             Log.d("JavaScriptInterface", "nativeSignIn called! Token: " + str);
-            WebViewManager.this.HideWebView();
             if (str == null || str.isEmpty() || "undefined".equals(str) || "null".equals(str)) {
-                ZennKuyBridge.openGoogleChooser();
                 return;
             }
+            WebViewManager.this.HideWebView();
             this.webviewManager.nativeOnScriptCall("nativeSignIn", str);
         }
 
@@ -259,14 +249,14 @@ public class WebViewManager {
         @Override @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView v, String url) {
             try {
-                if (url != null && url.contains("/google/callback")) {
-                    WebViewManager.this.HideWebView();
-                    return true;
-                }
                 Uri orig = Uri.parse(WebViewManager.originalURL == null ? "" : WebViewManager.originalURL);
                 Uri next = Uri.parse(url == null ? "" : url);
                 String oh = orig.getHost();
                 String nh = next.getHost();
+                if (nh != null && nh.contains("accounts.google.com")) {
+                    this.baseActivity.startActivity(new Intent(Intent.ACTION_VIEW, next));
+                    return true;
+                }
                 if (!WebViewManager.this.allowExternalLinks || oh == null || nh == null || oh.equals(nh)) {
                     v.loadUrl(url);
                     return true;
