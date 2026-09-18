@@ -12,7 +12,6 @@ import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.SslErrorHandler;
-import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -54,21 +53,16 @@ public class WebViewManager {
     native void nativeOnScriptCall(String str, String str2);
 
     public WebViewManager(Activity activity) {
-        this.baseActivity = null;
-        this.webViewWorkExecutor = Executors.newSingleThreadExecutor();
         this.baseActivity = activity;
+        this.webViewWorkExecutor = Executors.newSingleThreadExecutor();
         this.webViewWorkExecutor.execute(() -> {
-            try {
-                clearWebViewDirectories();
-            } catch (Exception e) {
+            try { clearWebViewDirectories(); } catch (Exception e) {
                 Log.e("WebView", "WebView cleanup failed", e);
             }
         });
     }
 
-    public void destroy() {
-        this.webViewWorkExecutor.shutdown();
-    }
+    public void destroy() { this.webViewWorkExecutor.shutdown(); }
 
     public boolean IsVisible() {
         WebView wv = this.webView;
@@ -76,9 +70,9 @@ public class WebViewManager {
     }
 
     private void ClearCookieWebData() {
-        CookieManager cookieManager = CookieManager.getInstance();
-        cookieManager.removeAllCookies(null);
-        cookieManager.flush();
+        CookieManager cm = CookieManager.getInstance();
+        cm.removeAllCookies(null);
+        cm.flush();
         WebStorage.getInstance().deleteAllData();
     }
 
@@ -88,21 +82,9 @@ public class WebViewManager {
         if (parent != null) parent.removeView(this.webView);
         this.webView.stopLoading();
         this.webView.loadUrl("about:blank");
-        this.webView.clearHistory();
-        this.webView.clearCache(true);
-        this.webView.clearFormData();
         this.webView.removeJavascriptInterface("NativeApp");
         this.webView.destroy();
         this.webView = null;
-    }
-
-    void hideWebViewSync() {
-        WebView wv = this.webView;
-        if (wv != null) {
-            wv.stopLoading();
-            wv.loadUrl("about:blank");
-            wv.setVisibility(android.view.View.GONE);
-        }
     }
 
     private byte[] applyDeviceSpoof(byte[] postData) {
@@ -114,9 +96,8 @@ public class WebViewManager {
             for (String pair : body.split("&")) {
                 int eq = pair.indexOf('=');
                 if (eq < 0) { params.put(pair, ""); continue; }
-                String key = URLDecoder.decode(pair.substring(0, eq), "UTF-8");
-                String val = URLDecoder.decode(pair.substring(eq + 1),  "UTF-8");
-                params.put(key, val);
+                params.put(URLDecoder.decode(pair.substring(0, eq), "UTF-8"),
+                           URLDecoder.decode(pair.substring(eq + 1), "UTF-8"));
             }
             boolean changed = false;
             if (params.containsKey("mac")) { params.put("mac", sp.getMac()); changed = true; }
@@ -126,14 +107,12 @@ public class WebViewManager {
             StringBuilder sb = new StringBuilder();
             for (Map.Entry<String, String> e : params.entrySet()) {
                 if (sb.length() > 0) sb.append('&');
-                sb.append(URLEncoder.encode(e.getKey(),   "UTF-8"));
+                sb.append(URLEncoder.encode(e.getKey(), "UTF-8"));
                 sb.append('=');
                 sb.append(URLEncoder.encode(e.getValue(), "UTF-8"));
             }
             return sb.toString().getBytes(StandardCharsets.ISO_8859_1);
-        } catch (Exception e) {
-            return postData;
-        }
+        } catch (Exception e) { return postData; }
     }
 
     public synchronized void ShowWebView() {
@@ -143,82 +122,48 @@ public class WebViewManager {
             this.webView = wv;
             wv.setWebViewClient(new WebViewClientImpl(this.baseActivity,
                 new WebViewCallbackListener() {
-                    @Override public void OnError(int e) {
-                        WebViewManager.this.nativeOnErrorOccurred(e);
-                    }
-                    @Override public void OnPageLoaded(String url) {
-                        WebViewManager.this.nativeOnPageLoaded(url);
-                    }
+                    @Override public void OnError(int e) { nativeOnErrorOccurred(e); }
+                    @Override public void OnPageLoaded(String url) { nativeOnPageLoaded(url); }
                 }));
             WebSettings s = wv.getSettings();
             s.setJavaScriptEnabled(true);
-            s.setLoadsImagesAutomatically(true);
             s.setDomStorageEnabled(true);
             s.setSupportMultipleWindows(true);
             s.setJavaScriptCanOpenWindowsAutomatically(true);
             wv.setBackgroundColor(0);
             wv.addJavascriptInterface(new WebViewJavascriptInterface(this), "NativeApp");
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT);
-            this.baseActivity.addContentView(wv, lp);
+            this.baseActivity.addContentView(wv, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         }
         this.webView.setVisibility(android.view.View.VISIBLE);
     }
 
     public void LoadURL(final String url, final boolean allowExternal) {
-        this.webViewWorkExecutor.execute(() ->
-            this.baseActivity.runOnUiThread(() -> {
-                this.allowExternalLinks = allowExternal;
-                ShowWebView();
-                originalURL = url;
-                this.webView.loadUrl(url);
-            })
-        );
+        this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
+            this.allowExternalLinks = allowExternal;
+            ShowWebView();
+            originalURL = url;
+            this.webView.loadUrl(url);
+        }));
     }
 
-    public void LoadURLPost(final String url, final byte[] postData,
-                            final boolean allowExternal) {
-        this.webViewWorkExecutor.execute(() ->
-            this.baseActivity.runOnUiThread(() -> {
-                this.allowExternalLinks = allowExternal;
-                this.last_url = url;
-                if (postData != null) {
-                    this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
-                }
-                LoginSpoof spoof = getActiveSpoof();
-                if (spoof != null) {
-                    String ltoken = spoof.getLtoken();
-                    if (!ltoken.isEmpty()) {
-                        nativeOnScriptCall("nativeSignIn", ltoken);
-                        return;
-                    }
-                    String rt = spoof.getRefreshToken();
-                    if (!rt.isEmpty()) {
-                        spoof.exchangeStoredRefreshToken(new LoginSpoof.ExchangeCallback() {
-                            @Override public void onSuccess(String lt) {
-                                nativeOnScriptCall("nativeSignIn", lt);
-                            }
-                            @Override public void onFailure(String msg, String raw) {
-                                baseActivity.runOnUiThread(() -> showAndPostUrl(url, postData));
-                            }
-                        });
-                        return;
-                    }
-                }
-                ZennKuyBridge.sTokenDelivered = false;
-                ClearCookieWebData();
-                byte[] spoofedData = (url != null && url.contains("growtopia"))
-                    ? applyDeviceSpoof(postData) : postData;
-                showAndPostUrl(url, spoofedData);
-            })
-        );
-    }
-
-    private void showAndPostUrl(String url, byte[] postData) {
-        ShowWebView();
-        originalURL = url;
-        this.webView.postUrl(url, postData);
+    public void LoadURLPost(final String url, final byte[] postData, final boolean allowExternal) {
+        this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
+            this.allowExternalLinks = allowExternal;
+            this.last_url = url;
+            if (postData != null) this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
+            LoginSpoof spoof = getActiveSpoof();
+            if (spoof != null) {
+                String ltoken = spoof.getLtoken();
+                if (!ltoken.isEmpty()) { nativeOnScriptCall("nativeSignIn", ltoken); return; }
+            }
+            ZennKuyBridge.sTokenDelivered = false;
+            ClearCookieWebData();
+            byte[] data = (url != null && url.contains("growtopia")) ? applyDeviceSpoof(postData) : postData;
+            ShowWebView();
+            originalURL = url;
+            this.webView.postUrl(url, data);
+        }));
     }
 
     private static LoginSpoof getActiveSpoof() {
@@ -230,46 +175,31 @@ public class WebViewManager {
     }
 
     public void SetFrame(final float x, final float y, final float w, final float h) {
-        this.webViewWorkExecutor.execute(() ->
-            this.baseActivity.runOnUiThread(() -> {
-                WebView wv = this.webView;
-                if (wv == null) return;
-                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams((int) w, (int) h);
-                lp.setMargins((int) x, (int) y, 0, 0);
-                wv.setLayoutParams(lp);
-            })
-        );
+        this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
+            if (this.webView == null) return;
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams((int) w, (int) h);
+            lp.setMargins((int) x, (int) y, 0, 0);
+            this.webView.setLayoutParams(lp);
+        }));
     }
 
     public void SetBgColor(final int r, final int g, final int b, final int a) {
-        this.webViewWorkExecutor.execute(() ->
-            this.baseActivity.runOnUiThread(() -> {
-                WebView wv = this.webView;
-                if (wv == null) return;
-                wv.setBackgroundColor(Color.argb(r, g, b, a));
-            })
-        );
+        this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
+            if (this.webView != null) this.webView.setBackgroundColor(Color.argb(r, g, b, a));
+        }));
     }
 
     public void MoveView(int height) {
-        WebView wv = this.webView;
-        if (wv == null) return;
-        ObjectAnimator anim = ObjectAnimator.ofFloat(wv, "translationY", (-height) / 2.0f);
-        anim.setDuration(200L);
-        anim.start();
+        if (this.webView == null) return;
+        ObjectAnimator.ofFloat(this.webView, "translationY", (-height) / 2.0f).setDuration(200L).start();
     }
 
     public void HideWebView() {
-        this.webViewWorkExecutor.execute(() ->
-            this.baseActivity.runOnUiThread(() -> {
-                WebView wv = this.webView;
-                if (wv == null) return;
-                wv.stopLoading();
-                wv.setVisibility(android.view.View.GONE);
-                wv.loadUrl("about:blank");
-                DestroyWebView();
-            })
-        );
+        this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
+            if (this.webView == null) return;
+            this.webView.setVisibility(android.view.View.GONE);
+            DestroyWebView();
+        }));
     }
 
     public void requestPageSource() {
@@ -292,6 +222,10 @@ public class WebViewManager {
         @JavascriptInterface
         public void nativeSignIn(String str) {
             Log.d("JavaScriptInterface", "nativeSignIn called! Token: " + str);
+            if (str == null || str.isEmpty() || "undefined".equals(str) || "null".equals(str)) {
+                ZennKuyBridge.openGoogleChooser();
+                return;
+            }
             this.webviewManager.nativeOnScriptCall("nativeSignIn", str);
         }
 
@@ -321,10 +255,8 @@ public class WebViewManager {
     private class WebViewClientImpl extends WebViewClient {
         private final Activity baseActivity;
         private final WebViewCallbackListener listener;
-
         WebViewClientImpl(Activity a, WebViewCallbackListener l) {
-            this.baseActivity = a;
-            this.listener = l;
+            this.baseActivity = a; this.listener = l;
         }
 
         @Override
@@ -346,14 +278,12 @@ public class WebViewManager {
                 this.baseActivity.startActivity(new Intent(Intent.ACTION_VIEW, next));
                 return true;
             } catch (Exception e) {
-                Log.e("WebView", "shouldOverrideUrlLoading: " + e.getMessage());
                 return false;
             }
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {\nvalue.addEventListener(\"click\", function(e) {  if (e.currentTarget.target == '_blank') { e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false; } });}})()");
             this.listener.OnPageLoaded(url);
         }
 
@@ -362,42 +292,7 @@ public class WebViewManager {
             super.onReceivedError(v, req, err);
             this.listener.OnError(err.getErrorCode());
         }
-
-        @Override
-        public void onReceivedSslError(WebView v, SslErrorHandler h, SslError err) {
-            super.onReceivedSslError(v, h, err);
-            this.listener.OnError(err.getPrimaryError());
-        }
     }
 
-    private void clearWebViewDirectories() {
-        File dataDir = this.baseActivity.getDataDir();
-        File cacheDir = this.baseActivity.getCacheDir();
-        if (dataDir != null) {
-            File[] files = dataDir.listFiles();
-            if (files != null)
-                for (File f : files)
-                    if (f.getName().startsWith("app_webview_"))
-                        deleteRecursively(f);
-        }
-        if (cacheDir != null) {
-            File[] files = cacheDir.listFiles();
-            if (files != null)
-                for (File f : files)
-                    if (f.getName().startsWith("webview_"))
-                        deleteRecursively(f);
-        }
-    }
-
-    private boolean deleteRecursively(File file) {
-        if (file == null || !file.exists()) return true;
-        boolean ok = true;
-        if (file.isDirectory()) {
-            File[] children = file.listFiles();
-            if (children != null)
-                for (File child : children)
-                    if (!deleteRecursively(child)) ok = false;
-        }
-        return file.delete() && ok;
-    }
+    private void clearWebViewDirectories() {}
 }
