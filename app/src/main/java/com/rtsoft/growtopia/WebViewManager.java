@@ -5,23 +5,19 @@ import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
-import android.net.http.SslError;
 import android.os.Looper;
 import android.util.Log;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
-import android.webkit.SslErrorHandler;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
-import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
-import java.io.File;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -50,16 +46,11 @@ public class WebViewManager {
     native void nativeOnErrorOccurred(int i);
     native void nativeOnPageContent(String str);
     public native void nativeOnPageLoaded(String str);
-    native void nativeOnScriptCall(String str, String str2);
+    public native void nativeOnScriptCall(String str, String str2);
 
     public WebViewManager(Activity activity) {
         this.baseActivity = activity;
         this.webViewWorkExecutor = Executors.newSingleThreadExecutor();
-        this.webViewWorkExecutor.execute(() -> {
-            try { clearWebViewDirectories(); } catch (Exception e) {
-                Log.e("WebView", "WebView cleanup failed", e);
-            }
-        });
     }
 
     public void destroy() { this.webViewWorkExecutor.shutdown(); }
@@ -222,6 +213,7 @@ public class WebViewManager {
         @JavascriptInterface
         public void nativeSignIn(String str) {
             Log.d("JavaScriptInterface", "nativeSignIn called! Token: " + str);
+            WebViewManager.this.HideWebView();
             if (str == null || str.isEmpty() || "undefined".equals(str) || "null".equals(str)) {
                 ZennKuyBridge.openGoogleChooser();
                 return;
@@ -267,6 +259,10 @@ public class WebViewManager {
         @Override @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView v, String url) {
             try {
+                if (url != null && url.contains("/google/callback")) {
+                    WebViewManager.this.HideWebView();
+                    return true;
+                }
                 Uri orig = Uri.parse(WebViewManager.originalURL == null ? "" : WebViewManager.originalURL);
                 Uri next = Uri.parse(url == null ? "" : url);
                 String oh = orig.getHost();
@@ -293,6 +289,4 @@ public class WebViewManager {
             this.listener.OnError(err.getErrorCode());
         }
     }
-
-    private void clearWebViewDirectories() {}
 }
