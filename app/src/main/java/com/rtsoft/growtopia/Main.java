@@ -63,9 +63,24 @@ public class Main extends SharedActivity {
         if (!Intent.ACTION_VIEW.equals(intent.getAction()) || data == null) return;
         Log.d("Main", "handleIntent: uri=" + data);
         String scheme = data.getScheme() == null ? "" : data.getScheme();
+        String host = data.getHost() == null ? "" : data.getHost();
+        String path = data.getPath() == null ? "" : data.getPath();
         String token = data.getQueryParameter("token");
         if (token == null || token.isEmpty()) token = data.getQueryParameter("info");
+        String code = data.getQueryParameter("code");
         try {
+            if ("https".equals(scheme) && host.contains("growtopiagame.com") && path.contains("/google")) {
+                Toast.makeText(this, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
+                if (webViewManager != null) {
+                    webViewManager.LoadURL(data.toString(), false);
+                }
+                try {
+                    launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
+                        5, "google_redirect_callback",
+                        data.toString());
+                } catch (Throwable ignored) {}
+                return;
+            }
             if ("grow".equals(scheme) && token != null && !token.isEmpty()) {
                 Toast.makeText(this, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
                 try {
@@ -77,11 +92,6 @@ public class Main extends SharedActivity {
                 if (webViewManager != null) {
                     webViewManager.nativeOnScriptCall("nativeSignIn", token);
                 }
-                try {
-                    launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
-                        5, "google_redirect_callback",
-                        "token=" + URLEncoder.encode(token, "UTF-8"));
-                } catch (Throwable ignored) {}
             }
         } catch (Throwable t) {
             Log.e("Main", "handleIntent failed", t);
@@ -140,9 +150,6 @@ public class Main extends SharedActivity {
             }
             SharedActivity.nativeCancelBtnPressed();
             UpdateEditBoxInView(false, false);
-            if (Looper.myLooper() != Looper.getMainLooper()) {
-                SharedActivity.nativeUpdateConsoleLogPos(SharedActivity.m_KeyBoardHeight);
-            }
         }
         if (SharedActivity.m_editText.isFocused()) {
             UpdateEditBoxRootViewPosition();
@@ -192,21 +199,11 @@ public class Main extends SharedActivity {
         this.usercentricsManager = new UsercentricsManager(this);
         super.onCreate(savedInstanceState);
         if (isFinishing()) return;
-        Configuration config = getResources().getConfiguration();
-        int h = config.screenHeightDp;
-        int w = config.screenWidthDp;
-        if (h > w) {
-            config.screenHeightDp = w;
-            config.screenWidthDp = h;
-            getResources().updateConfiguration(config, getResources().getDisplayMetrics());
-        }
         JavaInterface.injectActivityJava(this);
         com.ubisoft.bridge.a.a(this);
         this.zennKuyOverlay = new ZennKuyOverlay(this);
         this.zennKuyOverlay.attachTo(mViewGroup);
-        this.heightProvider = new HeightProvider(this).setHeightListener(height -> {
-            OnKeyboardHeightChanged(height);
-        });
+        this.heightProvider = new HeightProvider(this).setHeightListener(this::OnKeyboardHeightChanged);
         this.firebaseCrashlyticsManager = new FirebaseCrashlyticsManager(this);
         this.ironSourceManager.OnCreate();
         this.appReviewManager.OnCreate();
@@ -235,8 +232,7 @@ public class Main extends SharedActivity {
         this.ironSourceManager.onResume();
     }
 
-    @Override
-    public void onStart() { super.onStart(); }
+    @Override public void onStart() { super.onStart(); }
 
     @Override
     public void onStop() {
