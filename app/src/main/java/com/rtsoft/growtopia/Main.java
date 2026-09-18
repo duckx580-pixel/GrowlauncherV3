@@ -16,6 +16,7 @@ import android.view.inputmethod.InputMethodManager;
 
 import com.ubisoft.bridge.JavaInterface;
 
+import java.io.File;
 import java.net.URLEncoder;
 
 public class Main extends SharedActivity {
@@ -86,6 +87,21 @@ public class Main extends SharedActivity {
                 s.setEnabled(true);
             } catch (Throwable ignored) {}
             if (webViewManager != null) webViewManager.nativeOnScriptCall("nativeSignIn", token);
+        }
+    }
+
+    private void logSavePath() {
+        try {
+            File dir = getExternalFilesDir(null);
+            File save = dir == null ? null : new File(dir, "save.dat");
+            File cache = dir == null ? null : new File(dir, "cache");
+            Log.i("ZennKuyPath", "pkg=" + getPackageName()
+                + " files=" + (dir == null ? "null" : dir.getAbsolutePath())
+                + " save.exists=" + (save != null && save.isFile())
+                + " save.size=" + (save != null && save.isFile() ? save.length() : 0)
+                + " cache.dir=" + (cache != null && cache.isDirectory()));
+        } catch (Throwable t) {
+            Log.e("ZennKuyPath", "logSavePath", t);
         }
     }
 
@@ -176,6 +192,7 @@ public class Main extends SharedActivity {
         this.ironSourceManager.OnCreate();
         this.appReviewManager.OnCreate();
         getWindow().addFlags(128);
+        logSavePath();
         handleIntent(getIntent());
     }
 
@@ -198,6 +215,7 @@ public class Main extends SharedActivity {
         super.onResume();
         if (this.heightProvider != null) this.heightProvider.OnResume();
         this.ironSourceManager.onResume();
+        logSavePath();
     }
 
     @Override public void onStart() { super.onStart(); }
