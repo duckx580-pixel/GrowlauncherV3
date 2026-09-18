@@ -14,6 +14,9 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.rtsoft.growtopia.DeviceSpoofer;
 import com.rtsoft.growtopia.LoginSpoof;
 
+/**
+ * Settings screen: MAC, GID, RID spoofing, OpenGL spoof, fullscreen toggle.
+ */
 public class SettingsActivity extends AppCompatActivity {
 
     private DeviceSpoofer spoofer;
@@ -22,11 +25,11 @@ public class SettingsActivity extends AppCompatActivity {
     private EditText etMac;
     private EditText etGid;
     private EditText etRid;
-    private Switch   swOpenGL;
+    private Switch swOpenGL;
     private EditText etOglVersion;
     private EditText etOglExtensions;
     private LinearLayout layoutOpenGLFields;
-    private Switch   swFullscreen;
+    private Switch swFullscreen;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,7 +52,9 @@ public class SettingsActivity extends AppCompatActivity {
         etOglExtensions = findViewById(R.id.etOglExtensions);
         layoutOpenGLFields = findViewById(R.id.layoutOpenGLFields);
         swFullscreen = findViewById(R.id.swFullscreen);
-        if (btnBack != null) btnBack.setOnClickListener(v -> finish());
+        if (btnBack != null) {
+            btnBack.setOnClickListener(v -> finish());
+        }
     }
 
     private void loadCurrentValues() {
@@ -64,7 +69,6 @@ public class SettingsActivity extends AppCompatActivity {
             spoofer.isSpoofOpenGL() ? android.view.View.VISIBLE : android.view.View.GONE);
     }
 
-    /** Real: new device ids invalidate the last Google/ltoken. */
     private void clearLoginTokens() {
         loginSpoof.clearLtoken();
         loginSpoof.clearGoogleToken();
@@ -96,7 +100,7 @@ public class SettingsActivity extends AppCompatActivity {
         btnSaveGid.setOnClickListener(v -> {
             String val = etGid.getText().toString().trim();
             if (!DeviceSpoofer.isValidGid(val)) {
-                toast("Invalid GID");
+                toast("Invalid GID — format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx");
                 return;
             }
             spoofer.setGid(val);
@@ -114,7 +118,7 @@ public class SettingsActivity extends AppCompatActivity {
         btnSaveRid.setOnClickListener(v -> {
             String val = etRid.getText().toString().toUpperCase().trim();
             if (!DeviceSpoofer.isValidRid(val)) {
-                toast("Invalid RID — 32 hex");
+                toast("Invalid RID — must be 32 hex characters");
                 return;
             }
             spoofer.setRid(val);
@@ -138,20 +142,26 @@ public class SettingsActivity extends AppCompatActivity {
         if (btnSaveOglVersion != null) {
             btnSaveOglVersion.setOnClickListener(v -> {
                 String val = etOglVersion.getText().toString().trim();
-                if (TextUtils.isEmpty(val)) { toast("OpenGL version cannot be empty"); return; }
+                if (TextUtils.isEmpty(val)) {
+                    toast("OpenGL version cannot be empty");
+                    return;
+                }
                 spoofer.setOpenGLVersion(val);
                 toast("OpenGL version saved");
             });
         }
-        Button btnSaveOglExt = findViewById(R.id.btnSaveOglExt);
-        if (btnSaveOglExt == null) btnSaveOglExt = findViewById(R.id.btnSaveOglExtensions);
+
+        Button btnSaveOglExt = findViewById(R.id.btnSaveOglExtensions);
         if (btnSaveOglExt != null) {
             btnSaveOglExt.setOnClickListener(v -> {
-                spoofer.setOpenGLExtensions(etOglExtensions.getText().toString().trim());
+                String val = etOglExtensions.getText().toString().trim();
+                spoofer.setOpenGLExtensions(val);
                 toast("OpenGL extensions saved");
             });
         }
-        swFullscreen.setOnCheckedChangeListener((btn, checked) -> spoofer.setFullscreen(checked));
+
+        swFullscreen.setOnCheckedChangeListener((btn, checked) ->
+            spoofer.setFullscreen(checked));
     }
 
     private void toast(String msg) {
