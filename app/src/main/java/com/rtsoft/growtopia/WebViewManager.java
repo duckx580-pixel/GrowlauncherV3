@@ -22,7 +22,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class WebViewManager {
-    private static String originalURL;
+    public static String originalURL = "";
     private Activity baseActivity;
     private final ExecutorService webViewWorkExecutor;
     boolean allowExternalLinks = true;
@@ -66,6 +66,18 @@ public class WebViewManager {
         this.webView = null;
     }
 
+    public void openDashboardInChrome() {
+        String target = last_url;
+        if (target == null || target.isEmpty()) target = originalURL;
+        if (target == null || target.isEmpty()) return;
+        try {
+            Intent go = new Intent(Intent.ACTION_VIEW, Uri.parse(target));
+            baseActivity.startActivityForResult(go, 1);
+        } catch (Exception e) {
+            Log.e("WebViewManager", "open dashboard chrome", e);
+        }
+    }
+
     public synchronized void ShowWebView() {
         if (Looper.getMainLooper().getThread() != Thread.currentThread()) return;
         if (this.webView == null) {
@@ -101,15 +113,25 @@ public class WebViewManager {
     public void LoadURLPost(final String url, final byte[] postData, final boolean allowExternal) {
         this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
             this.allowExternalLinks = allowExternal;
+            originalURL = url;
             this.last_url = url;
             if (postData != null) this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
+            try {
+                launcher.powerkuy.growlauncher.api.JavaForNative.getSafeGameVersion();
+                launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(5, "google_last_url", this.last_url);
+            } catch (Throwable ignored) {}
             LoginSpoof spoof = getActiveSpoof();
             if (spoof != null) {
                 String ltoken = spoof.getLtoken();
                 if (!ltoken.isEmpty()) { nativeOnScriptCall("nativeSignIn", ltoken); return; }
             }
+            try {
+                if (launcher.powerkuy.growlauncher.api.JavaForNative.isLtokenSpoofActive()) return;
+            } catch (Throwable ignored) {}
+            try {
+                launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(5, "google_last_packet", this.last_packet);
+            } catch (Throwable ignored) {}
             ShowWebView();
-            originalURL = url;
             this.webView.postUrl(url, postData);
         }));
     }
@@ -169,9 +191,20 @@ public class WebViewManager {
 
         @JavascriptInterface
         public void nativeSignIn(String str) {
-            if (str == null || str.isEmpty() || "undefined".equals(str) || "null".equals(str)) return;
-            WebViewManager.this.HideWebView();
-            this.webviewManager.nativeOnScriptCall("nativeSignIn", str);
+            WebViewManager.this.baseActivity.runOnUiThread(() -> {
+                Toast.makeText(WebViewManager.this.baseActivity,
+                    "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
+                WebViewManager.this.HideWebView();
+                try {
+                    launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
+                        0, "google_login_btn", Boolean.TRUE);
+                } catch (Throwable ignored) {}
+                if (str != null && !str.isEmpty() && !"undefined".equals(str) && !"null".equals(str)) {
+                    webviewManager.nativeOnScriptCall("nativeSignIn", str);
+                    return;
+                }
+                WebViewManager.this.openDashboardInChrome();
+            });
         }
 
         @JavascriptInterface
@@ -191,9 +224,14 @@ public class WebViewManager {
 
         @JavascriptInterface
         public void openInBrowser(final String url) {
-            WebViewManager.this.baseActivity.runOnUiThread(() ->
+            WebViewManager.this.baseActivity.runOnUiThread(() -> {
+                if (url != null && url.contains("accounts.google.com")) {
+                    WebViewManager.this.openDashboardInChrome();
+                    return;
+                }
                 WebViewManager.this.baseActivity.startActivity(
-                    new Intent(Intent.ACTION_VIEW, Uri.parse(url))));
+                    new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            });
         }
     }
 
@@ -212,15 +250,15 @@ public class WebViewManager {
         @Override @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView v, String url) {
             try {
-                Uri orig = Uri.parse(WebViewManager.originalURL == null ? "" : WebViewManager.originalURL);
                 Uri next = Uri.parse(url == null ? "" : url);
-                String oh = orig.getHost();
                 String nh = next.getHost();
                 if (nh != null && nh.contains("accounts.google.com")) {
                     Toast.makeText(this.baseActivity, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
-                    this.baseActivity.startActivityForResult(new Intent(Intent.ACTION_VIEW, next), 1);
+                    WebViewManager.this.openDashboardInChrome();
                     return true;
                 }
+                Uri orig = Uri.parse(WebViewManager.originalURL == null ? "" : WebViewManager.originalURL);
+                String oh = orig.getHost();
                 if (!WebViewManager.this.allowExternalLinks || oh == null || nh == null || oh.equals(nh)) {
                     v.loadUrl(url);
                     return true;
