@@ -18,8 +18,6 @@ import android.view.inputmethod.InputMethodManager;
 
 import com.ubisoft.bridge.JavaInterface;
 
-import java.net.URLEncoder;
-
 public class Main extends SharedActivity {
     public static boolean OriginalKeyboard = false;
     public static boolean block_pause;
@@ -61,24 +59,15 @@ public class Main extends SharedActivity {
         if (intent == null) return;
         Uri data = intent.getData();
         if (!Intent.ACTION_VIEW.equals(intent.getAction()) || data == null) return;
-        Log.d("Main", "handleIntent: uri=" + data);
         String scheme = data.getScheme() == null ? "" : data.getScheme();
         String host = data.getHost() == null ? "" : data.getHost();
         String path = data.getPath() == null ? "" : data.getPath();
         String token = data.getQueryParameter("token");
         if (token == null || token.isEmpty()) token = data.getQueryParameter("info");
-        String code = data.getQueryParameter("code");
         try {
             if ("https".equals(scheme) && host.contains("growtopiagame.com") && path.contains("/google")) {
                 Toast.makeText(this, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
-                if (webViewManager != null) {
-                    webViewManager.LoadURL(data.toString(), false);
-                }
-                try {
-                    launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
-                        5, "google_redirect_callback",
-                        data.toString());
-                } catch (Throwable ignored) {}
+                if (webViewManager != null) webViewManager.LoadURL(data.toString(), false);
                 return;
             }
             if ("grow".equals(scheme) && token != null && !token.isEmpty()) {
@@ -89,9 +78,7 @@ public class Main extends SharedActivity {
                     s.setLtoken(token);
                     s.setEnabled(true);
                 } catch (Throwable ignored) {}
-                if (webViewManager != null) {
-                    webViewManager.nativeOnScriptCall("nativeSignIn", token);
-                }
+                if (webViewManager != null) webViewManager.nativeOnScriptCall("nativeSignIn", token);
             }
         } catch (Throwable t) {
             Log.e("Main", "handleIntent failed", t);
@@ -108,21 +95,6 @@ public class Main extends SharedActivity {
             if (isImGuiCapturingInput()) return true;
         } catch (UnsatisfiedLinkError ignored) {}
         return super.dispatchTouchEvent(ev);
-    }
-
-    private void applyImmersiveFullscreen() {
-        if (Build.VERSION.SDK_INT >= 30) {
-            WindowInsetsController controller = getWindow().getInsetsController();
-            if (controller != null) {
-                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
-                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            }
-        } else {
-            getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
-        }
     }
 
     @Override
@@ -145,15 +117,11 @@ public class Main extends SharedActivity {
             UpdateEditBoxInView(true, false);
         } else if (!keyboardOpen && SharedActivity.m_editText.isFocused()) {
             SharedActivity.nativeOnInputText(SharedActivity.m_editText.getText().toString());
-            if (!SharedActivity.passwordField) {
-                SharedActivity.nativeOnKey(1, 500000, 0);
-            }
+            if (!SharedActivity.passwordField) SharedActivity.nativeOnKey(1, 500000, 0);
             SharedActivity.nativeCancelBtnPressed();
             UpdateEditBoxInView(false, false);
         }
-        if (SharedActivity.m_editText.isFocused()) {
-            UpdateEditBoxRootViewPosition();
-        }
+        if (SharedActivity.m_editText.isFocused()) UpdateEditBoxRootViewPosition();
     }
 
     public void hideKeyboard(Activity activity) {
@@ -173,12 +141,8 @@ public class Main extends SharedActivity {
 
     @Override
     public void onConfigurationChanged(Configuration config) {
-        int h = config.screenHeightDp;
-        int w = config.screenWidthDp;
-        if (h > w) {
-            config.screenHeightDp = w;
-            config.screenWidthDp = h;
-        }
+        int h = config.screenHeightDp, w = config.screenWidthDp;
+        if (h > w) { config.screenHeightDp = w; config.screenWidthDp = h; }
         super.onConfigurationChanged(config);
         getResources().updateConfiguration(config, getResources().getDisplayMetrics());
     }
