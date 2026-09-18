@@ -96,6 +96,7 @@ public class Main extends SharedActivity {
             File save = dir == null ? null : new File(dir, "save.dat");
             File cache = dir == null ? null : new File(dir, "cache");
             Log.i("ZennKuyPath", "pkg=" + getPackageName()
+                + " assetPkg=" + SharedActivity.PackageName
                 + " files=" + (dir == null ? "null" : dir.getAbsolutePath())
                 + " save.exists=" + (save != null && save.isFile())
                 + " save.size=" + (save != null && save.isFile() ? save.length() : 0)
@@ -177,7 +178,7 @@ public class Main extends SharedActivity {
         SharedActivity.securityEnabled = false;
         SharedActivity.IAPEnabled = true;
         SharedActivity.HookedEnabled = false;
-        SharedActivity.PackageName = SharedActivity.GROWTOPIA_PACKAGE;
+        SharedActivity.PackageName = getPackageName();
         com.gentz.launcher.CrashLogger.markLaunchStarted();
         NativeLibraries.loadGame();
         this.usercentricsManager = new UsercentricsManager(this);
