@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Looper;
 import android.util.Log;
+import android.widget.Toast;
 import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceError;
@@ -97,7 +98,6 @@ public class WebViewManager {
         }));
     }
 
-    /** Real: post engine body as-is (valKey + mac + rid together). */
     public void LoadURLPost(final String url, final byte[] postData, final boolean allowExternal) {
         this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
             this.allowExternalLinks = allowExternal;
@@ -217,7 +217,8 @@ public class WebViewManager {
                 String oh = orig.getHost();
                 String nh = next.getHost();
                 if (nh != null && nh.contains("accounts.google.com")) {
-                    this.baseActivity.startActivity(new Intent(Intent.ACTION_VIEW, next));
+                    Toast.makeText(this.baseActivity, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
+                    this.baseActivity.startActivityForResult(new Intent(Intent.ACTION_VIEW, next), 1);
                     return true;
                 }
                 if (!WebViewManager.this.allowExternalLinks || oh == null || nh == null || oh.equals(nh)) {
