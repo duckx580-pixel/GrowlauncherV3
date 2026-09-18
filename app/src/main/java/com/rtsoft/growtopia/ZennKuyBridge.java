@@ -51,15 +51,15 @@ public final class ZennKuyBridge {
         }
     }
 
+    /** Chrome account picker only; result / https callback returns to Main. */
     public static void openGoogleChooser() {
         Activity act = Main.mainApp;
         if (act == null) return;
         act.runOnUiThread(() -> {
             try {
                 Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(GOOGLE_OAUTH_URL));
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                act.startActivity(intent);
-                Log.d(TAG, "openGoogleChooser: Chrome");
+                act.startActivityForResult(intent, 1);
+                Log.d(TAG, "openGoogleChooser: Chrome for-result");
             } catch (Exception e) {
                 Log.e(TAG, "openGoogleChooser: " + e.getMessage());
             }
