@@ -8,21 +8,15 @@ import android.net.Uri;
 import android.os.Looper;
 import android.util.Log;
 import android.view.ViewGroup;
-import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
-import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
-import java.net.URLDecoder;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -71,34 +65,6 @@ public class WebViewManager {
         this.webView = null;
     }
 
-    private byte[] applyDeviceSpoof(byte[] postData) {
-        if (postData == null || postData.length == 0) return postData;
-        try {
-            DeviceSpoofer sp = new DeviceSpoofer(baseActivity);
-            String body = new String(postData, StandardCharsets.ISO_8859_1);
-            Map<String, String> params = new LinkedHashMap<>();
-            for (String pair : body.split("&")) {
-                int eq = pair.indexOf('=');
-                if (eq < 0) { params.put(pair, ""); continue; }
-                params.put(URLDecoder.decode(pair.substring(0, eq), "UTF-8"),
-                           URLDecoder.decode(pair.substring(eq + 1), "UTF-8"));
-            }
-            boolean changed = false;
-            if (params.containsKey("mac")) { params.put("mac", sp.getMac()); changed = true; }
-            if (params.containsKey("rid")) { params.put("rid", sp.getRid()); changed = true; }
-            if (params.containsKey("gid")) { params.put("gid", sp.getGid()); changed = true; }
-            if (!changed) return postData;
-            StringBuilder sb = new StringBuilder();
-            for (Map.Entry<String, String> e : params.entrySet()) {
-                if (sb.length() > 0) sb.append('&');
-                sb.append(URLEncoder.encode(e.getKey(), "UTF-8"));
-                sb.append('=');
-                sb.append(URLEncoder.encode(e.getValue(), "UTF-8"));
-            }
-            return sb.toString().getBytes(StandardCharsets.ISO_8859_1);
-        } catch (Exception e) { return postData; }
-    }
-
     public synchronized void ShowWebView() {
         if (Looper.getMainLooper().getThread() != Thread.currentThread()) return;
         if (this.webView == null) {
@@ -131,6 +97,7 @@ public class WebViewManager {
         }));
     }
 
+    /** Real: post engine body as-is (valKey + mac + rid together). */
     public void LoadURLPost(final String url, final byte[] postData, final boolean allowExternal) {
         this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
             this.allowExternalLinks = allowExternal;
@@ -141,10 +108,9 @@ public class WebViewManager {
                 String ltoken = spoof.getLtoken();
                 if (!ltoken.isEmpty()) { nativeOnScriptCall("nativeSignIn", ltoken); return; }
             }
-            byte[] data = (url != null && url.contains("growtopia")) ? applyDeviceSpoof(postData) : postData;
             ShowWebView();
             originalURL = url;
-            this.webView.postUrl(url, data);
+            this.webView.postUrl(url, postData);
         }));
     }
 
@@ -203,10 +169,7 @@ public class WebViewManager {
 
         @JavascriptInterface
         public void nativeSignIn(String str) {
-            Log.d("JavaScriptInterface", "nativeSignIn called! Token: " + str);
-            if (str == null || str.isEmpty() || "undefined".equals(str) || "null".equals(str)) {
-                return;
-            }
+            if (str == null || str.isEmpty() || "undefined".equals(str) || "null".equals(str)) return;
             WebViewManager.this.HideWebView();
             this.webviewManager.nativeOnScriptCall("nativeSignIn", str);
         }
