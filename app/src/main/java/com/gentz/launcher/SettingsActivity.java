@@ -3,69 +3,53 @@ package com.gentz.launcher;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.widget.Button;
-import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.Switch;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.gentz.launcher.R;
 import com.rtsoft.growtopia.DeviceSpoofer;
+import com.rtsoft.growtopia.LoginSpoof;
 
-/**
- * Settings screen: MAC, GID, RID spoofing, OpenGL spoof, fullscreen toggle.
- * All values are backed by {@link DeviceSpoofer} / SharedPreferences.
- */
 public class SettingsActivity extends AppCompatActivity {
 
     private DeviceSpoofer spoofer;
+    private LoginSpoof loginSpoof;
 
-    // MAC
     private EditText etMac;
-    // GID
     private EditText etGid;
-    // RID
     private EditText etRid;
-    // OpenGL
     private Switch   swOpenGL;
     private EditText etOglVersion;
     private EditText etOglExtensions;
     private LinearLayout layoutOpenGLFields;
-    // Fullscreen
     private Switch   swFullscreen;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
-
         spoofer = new DeviceSpoofer(this);
-
+        loginSpoof = new LoginSpoof(this);
         bindViews();
         loadCurrentValues();
         hookListeners();
     }
 
-    // -----------------------------------------------------------------------
-
     private void bindViews() {
-        ImageButton btnBack       = findViewById(R.id.btnSettingsBack);
-        etMac                     = findViewById(R.id.etMac);
-        etGid                     = findViewById(R.id.etGid);
-        etRid                     = findViewById(R.id.etRid);
-        swOpenGL                  = findViewById(R.id.swOpenGL);
-        etOglVersion              = findViewById(R.id.etOglVersion);
-        etOglExtensions           = findViewById(R.id.etOglExtensions);
-        layoutOpenGLFields        = findViewById(R.id.layoutOpenGLFields);
-        swFullscreen              = findViewById(R.id.swFullscreen);
-
-        if (btnBack != null) {
-            btnBack.setOnClickListener(v -> finish());
-        }
+        ImageButton btnBack = findViewById(R.id.btnSettingsBack);
+        etMac = findViewById(R.id.etMac);
+        etGid = findViewById(R.id.etGid);
+        etRid = findViewById(R.id.etRid);
+        swOpenGL = findViewById(R.id.swOpenGL);
+        etOglVersion = findViewById(R.id.etOglVersion);
+        etOglExtensions = findViewById(R.id.etOglExtensions);
+        layoutOpenGLFields = findViewById(R.id.layoutOpenGLFields);
+        swFullscreen = findViewById(R.id.swFullscreen);
+        if (btnBack != null) btnBack.setOnClickListener(v -> finish());
     }
 
     private void loadCurrentValues() {
@@ -80,14 +64,16 @@ public class SettingsActivity extends AppCompatActivity {
             spoofer.isSpoofOpenGL() ? android.view.View.VISIBLE : android.view.View.GONE);
     }
 
-    private void hookListeners() {
-        // ---- Back ----
-        // (handled in bindViews)
+    /** Real: new device ids invalidate the last Google/ltoken. */
+    private void clearLoginTokens() {
+        loginSpoof.clearLtoken();
+        loginSpoof.clearGoogleToken();
+        toast("Token cleared — login again after spoof change");
+    }
 
-        // ---- MAC ----
+    private void hookListeners() {
         Button btnSaveMac = findViewById(R.id.btnSaveMac);
         Button btnRandMac = findViewById(R.id.btnRandMac);
-
         btnSaveMac.setOnClickListener(v -> {
             String val = etMac.getText().toString().toUpperCase().trim();
             if (!DeviceSpoofer.isValidMac(val)) {
@@ -96,60 +82,52 @@ public class SettingsActivity extends AppCompatActivity {
             }
             spoofer.setMac(val);
             etMac.setText(val);
-            toast("MAC saved");
+            clearLoginTokens();
         });
-
         btnRandMac.setOnClickListener(v -> {
             String mac = DeviceSpoofer.generateMac();
             etMac.setText(mac);
             spoofer.setMac(mac);
-            toast("MAC randomized");
+            clearLoginTokens();
         });
 
-        // ---- GID ----
         Button btnSaveGid = findViewById(R.id.btnSaveGid);
         Button btnRandGid = findViewById(R.id.btnRandGid);
-
         btnSaveGid.setOnClickListener(v -> {
             String val = etGid.getText().toString().trim();
             if (!DeviceSpoofer.isValidGid(val)) {
-                toast("Invalid GID — format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx");
+                toast("Invalid GID");
                 return;
             }
             spoofer.setGid(val);
-            toast("GID saved");
+            clearLoginTokens();
         });
-
         btnRandGid.setOnClickListener(v -> {
             String gid = DeviceSpoofer.generateGid();
             etGid.setText(gid);
             spoofer.setGid(gid);
-            toast("GID randomized");
+            clearLoginTokens();
         });
 
-        // ---- RID ----
         Button btnSaveRid = findViewById(R.id.btnSaveRid);
         Button btnRandRid = findViewById(R.id.btnRandRid);
-
         btnSaveRid.setOnClickListener(v -> {
             String val = etRid.getText().toString().toUpperCase().trim();
             if (!DeviceSpoofer.isValidRid(val)) {
-                toast("Invalid RID — must be 32 hex characters");
+                toast("Invalid RID — 32 hex");
                 return;
             }
             spoofer.setRid(val);
             etRid.setText(val);
-            toast("RID saved");
+            clearLoginTokens();
         });
-
         btnRandRid.setOnClickListener(v -> {
             String rid = DeviceSpoofer.generateRid();
             etRid.setText(rid);
             spoofer.setRid(rid);
-            toast("RID randomized");
+            clearLoginTokens();
         });
 
-        // ---- OpenGL spoof ----
         swOpenGL.setOnCheckedChangeListener((btn, checked) -> {
             spoofer.setSpoofOpenGL(checked);
             layoutOpenGLFields.setVisibility(
@@ -165,19 +143,15 @@ public class SettingsActivity extends AppCompatActivity {
                 toast("OpenGL version saved");
             });
         }
-
-        Button btnSaveOglExt = findViewById(R.id.btnSaveOglExtensions);
+        Button btnSaveOglExt = findViewById(R.id.btnSaveOglExt);
+        if (btnSaveOglExt == null) btnSaveOglExt = findViewById(R.id.btnSaveOglExtensions);
         if (btnSaveOglExt != null) {
             btnSaveOglExt.setOnClickListener(v -> {
-                String val = etOglExtensions.getText().toString().trim();
-                spoofer.setOpenGLExtensions(val);
+                spoofer.setOpenGLExtensions(etOglExtensions.getText().toString().trim());
                 toast("OpenGL extensions saved");
             });
         }
-
-        // ---- Fullscreen ----
-        swFullscreen.setOnCheckedChangeListener((btn, checked) ->
-            spoofer.setFullscreen(checked));
+        swFullscreen.setOnCheckedChangeListener((btn, checked) -> spoofer.setFullscreen(checked));
     }
 
     private void toast(String msg) {
