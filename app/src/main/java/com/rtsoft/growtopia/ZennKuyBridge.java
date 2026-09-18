@@ -14,14 +14,6 @@ public final class ZennKuyBridge {
     public static final String DASHBOARD_URL =
         "https://login.growtopiagame.com/player/login/dashboard?valKey=40db4045f2d8c572efe8c4a060605726";
 
-    public static final String GOOGLE_OAUTH_URL =
-        "https://accounts.google.com/o/oauth2/v2/auth"
-        + "?client_id=389994132396-4s6ol46f60831v5blfpci7lnmsdnh8br.apps.googleusercontent.com"
-        + "&redirect_uri=" + Uri.encode("https://login.growtopiagame.com/google/callback")
-        + "&response_type=code"
-        + "&scope=" + Uri.encode("openid profile email")
-        + "&prompt=select_account";
-
     private static LoginSpoof spoof() {
         if (Main.mainApp == null) return null;
         return new LoginSpoof(Main.mainApp);
@@ -54,19 +46,39 @@ public final class ZennKuyBridge {
         }
     }
 
-    /** ZK menu button. Opens Chrome accountchooser. Does not use GMS. */
+    /** Same door as Real/Genta: dashboard WebView, then host-jump Chrome. */
     public static void startResolving() {
         Activity act = Main.mainApp;
         if (act == null) {
             Log.e(TAG, "startResolving: Main.mainApp is null");
             return;
         }
+        if (sTokenDelivered) {
+            Log.d(TAG, "startResolving: token already delivered");
+            return;
+        }
         act.runOnUiThread(() -> {
             try {
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(GOOGLE_OAUTH_URL));
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                act.startActivity(intent);
-                Log.d(TAG, "startResolving: Chrome OAuth");
+                WebViewManager wvm = Main.mainApp.webViewManager;
+                if (wvm == null) {
+                    Log.e(TAG, "startResolving: webViewManager is null");
+                    return;
+                }
+                if (wvm.IsVisible()) {
+                    Log.d(TAG, "startResolving: WebView already visible");
+                    return;
+                }
+                String storedUrl = wvm.last_url;
+                String storedPacket = wvm.last_packet;
+                if (storedUrl != null && !storedUrl.isEmpty()
+                        && storedPacket != null && !storedPacket.isEmpty()) {
+                    byte[] post = storedPacket.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+                    wvm.LoadURLPost(storedUrl, post, true);
+                    Log.d(TAG, "startResolving: replay LoadURLPost " + storedUrl);
+                } else {
+                    wvm.LoadURL(DASHBOARD_URL, true);
+                    Log.d(TAG, "startResolving: dashboard GET fallback");
+                }
             } catch (Exception e) {
                 Log.e(TAG, "startResolving: " + e.getMessage());
             }
