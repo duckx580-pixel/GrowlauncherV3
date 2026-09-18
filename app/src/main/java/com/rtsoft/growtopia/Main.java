@@ -13,7 +13,6 @@ import android.widget.Toast;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
-import android.view.WindowInsetsController;
 import android.view.inputmethod.InputMethodManager;
 
 import com.ubisoft.bridge.JavaInterface;
@@ -55,33 +54,47 @@ public class Main extends SharedActivity {
     }
     public static WebViewManager GetWebViewManager() { return mainApp.webViewManager; }
 
-    private void handleIntent(Intent intent) {
-        if (intent == null) return;
-        Uri data = intent.getData();
-        if (!Intent.ACTION_VIEW.equals(intent.getAction()) || data == null) return;
-        String scheme = data.getScheme() == null ? "" : data.getScheme();
-        String host = data.getHost() == null ? "" : data.getHost();
-        String path = data.getPath() == null ? "" : data.getPath();
-        String token = data.getQueryParameter("token");
-        if (token == null || token.isEmpty()) token = data.getQueryParameter("info");
-        try {
-            if ("https".equals(scheme) && host.contains("growtopiagame.com") && path.contains("/google")) {
-                Toast.makeText(this, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
-                if (webViewManager != null) webViewManager.LoadURL(data.toString(), false);
-                return;
-            }
-            if ("grow".equals(scheme) && token != null && !token.isEmpty()) {
-                Toast.makeText(this, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
+    /** Same as gentahax Main.HandleDeeplink — engine eats grow:// without the menu button. */
+    public static boolean HandleDeeplink(Intent intent) {
+        if (intent == null) return false;
+        final Uri data = intent.getData();
+        if (data == null) return false;
+        Log.d("Main", "HandleDeeplink " + data);
+        if (mainApp == null) return false;
+        mainApp.runOnUiThread(() -> {
+            Toast.makeText(mainApp, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
+            String token = data.getQueryParameter("token");
+            if (token == null || token.isEmpty()) token = data.getQueryParameter("info");
+            if (token != null && !token.isEmpty()) {
                 try {
-                    LoginSpoof s = new LoginSpoof(this);
+                    LoginSpoof s = new LoginSpoof(mainApp);
                     s.setGoogleToken(token);
                     s.setLtoken(token);
                     s.setEnabled(true);
                 } catch (Throwable ignored) {}
-                if (webViewManager != null) webViewManager.nativeOnScriptCall("nativeSignIn", token);
             }
-        } catch (Throwable t) {
-            Log.e("Main", "handleIntent failed", t);
+            try {
+                NativeAppInterface.OnDeepLinkProcess(data.getSchemeSpecificPart());
+            } catch (Throwable t) {
+                Log.e("Main", "OnDeepLinkProcess", t);
+            }
+        });
+        return true;
+    }
+
+    private void handleIntent(Intent intent) {
+        if (intent == null || intent.getData() == null) return;
+        Uri data = intent.getData();
+        String scheme = data.getScheme() == null ? "" : data.getScheme();
+        String host = data.getHost() == null ? "" : data.getHost();
+        String path = data.getPath() == null ? "" : data.getPath();
+        if ("https".equals(scheme) && host.contains("growtopiagame.com") && path.contains("/google")) {
+            Toast.makeText(this, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
+            if (webViewManager != null) webViewManager.LoadURL(data.toString(), false);
+            return;
+        }
+        if ("grow".equals(scheme)) {
+            HandleDeeplink(intent);
         }
     }
 
