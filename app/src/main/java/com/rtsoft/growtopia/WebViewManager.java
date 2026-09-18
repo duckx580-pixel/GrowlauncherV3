@@ -71,6 +71,7 @@ public class WebViewManager {
         if (target == null || target.isEmpty()) target = originalURL;
         if (target == null || target.isEmpty()) return;
         try {
+            Toast.makeText(baseActivity, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
             Intent go = new Intent(Intent.ACTION_VIEW, Uri.parse(target));
             baseActivity.startActivityForResult(go, 1);
         } catch (Exception e) {
@@ -117,13 +118,15 @@ public class WebViewManager {
             this.last_url = url;
             if (postData != null) this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
             try {
-                launcher.powerkuy.growlauncher.api.JavaForNative.getSafeGameVersion();
                 launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(5, "google_last_url", this.last_url);
             } catch (Throwable ignored) {}
             LoginSpoof spoof = getActiveSpoof();
             if (spoof != null) {
                 String ltoken = spoof.getLtoken();
-                if (!ltoken.isEmpty()) { nativeOnScriptCall("nativeSignIn", ltoken); return; }
+                if (ltoken != null && !ltoken.isEmpty()) {
+                    nativeOnScriptCall("nativeSignIn", ltoken);
+                    return;
+                }
             }
             try {
                 if (launcher.powerkuy.growlauncher.api.JavaForNative.isLtokenSpoofActive()) return;
@@ -131,8 +134,7 @@ public class WebViewManager {
             try {
                 launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(5, "google_last_packet", this.last_packet);
             } catch (Throwable ignored) {}
-            ShowWebView();
-            this.webView.postUrl(url, postData);
+            openDashboardInChrome();
         }));
     }
 
@@ -253,7 +255,6 @@ public class WebViewManager {
                 Uri next = Uri.parse(url == null ? "" : url);
                 String nh = next.getHost();
                 if (nh != null && nh.contains("accounts.google.com")) {
-                    Toast.makeText(this.baseActivity, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
                     WebViewManager.this.openDashboardInChrome();
                     return true;
                 }
