@@ -7,7 +7,6 @@ import android.net.Uri;
 import android.opengl.GLSurfaceView;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Looper;
 import android.util.Log;
 import android.widget.Toast;
 import android.view.MotionEvent;
@@ -16,6 +15,8 @@ import android.view.WindowInsets;
 import android.view.inputmethod.InputMethodManager;
 
 import com.ubisoft.bridge.JavaInterface;
+
+import java.net.URLEncoder;
 
 public class Main extends SharedActivity {
     public static boolean OriginalKeyboard = false;
@@ -54,47 +55,37 @@ public class Main extends SharedActivity {
     }
     public static WebViewManager GetWebViewManager() { return mainApp.webViewManager; }
 
-    /** Same as gentahax Main.HandleDeeplink — engine eats grow:// without the menu button. */
-    public static boolean HandleDeeplink(Intent intent) {
-        if (intent == null) return false;
-        final Uri data = intent.getData();
-        if (data == null) return false;
-        Log.d("Main", "HandleDeeplink " + data);
-        if (mainApp == null) return false;
-        mainApp.runOnUiThread(() -> {
-            Toast.makeText(mainApp, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
-            String token = data.getQueryParameter("token");
-            if (token == null || token.isEmpty()) token = data.getQueryParameter("info");
-            if (token != null && !token.isEmpty()) {
-                try {
-                    LoginSpoof s = new LoginSpoof(mainApp);
-                    s.setGoogleToken(token);
-                    s.setLtoken(token);
-                    s.setEnabled(true);
-                } catch (Throwable ignored) {}
-            }
-            try {
-                NativeAppInterface.OnDeepLinkProcess(data.getSchemeSpecificPart());
-            } catch (Throwable t) {
-                Log.e("Main", "OnDeepLinkProcess", t);
-            }
-        });
-        return true;
-    }
-
     private void handleIntent(Intent intent) {
-        if (intent == null || intent.getData() == null) return;
+        if (intent == null || !Intent.ACTION_VIEW.equals(intent.getAction())) return;
         Uri data = intent.getData();
-        String scheme = data.getScheme() == null ? "" : data.getScheme();
-        String host = data.getHost() == null ? "" : data.getHost();
-        String path = data.getPath() == null ? "" : data.getPath();
-        if ("https".equals(scheme) && host.contains("growtopiagame.com") && path.contains("/google")) {
-            Toast.makeText(this, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
-            if (webViewManager != null) webViewManager.LoadURL(data.toString(), false);
-            return;
+        if (data == null) return;
+        if (!"grow".equals(data.getScheme())) return;
+
+        String info = data.getQueryParameter("info");
+        String token = data.getQueryParameter("token");
+        Toast.makeText(this, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
+
+        try {
+            String payload = "info=" + URLEncoder.encode(info == null ? "" : info, "UTF-8")
+                + "&token=" + URLEncoder.encode(token == null ? "" : token, "UTF-8");
+            launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
+                5, "google_redirect_callback", payload);
+        } catch (Throwable ignored) {}
+
+        try {
+            NativeAppInterface.OnDeepLinkProcess(data.getSchemeSpecificPart());
+        } catch (Throwable t) {
+            Log.e("Main", "OnDeepLinkProcess", t);
         }
-        if ("grow".equals(scheme)) {
-            HandleDeeplink(intent);
+
+        if (token != null && !token.isEmpty()) {
+            try {
+                LoginSpoof s = new LoginSpoof(this);
+                s.setGoogleToken(token);
+                s.setLtoken(token);
+                s.setEnabled(true);
+            } catch (Throwable ignored) {}
+            if (webViewManager != null) webViewManager.nativeOnScriptCall("nativeSignIn", token);
         }
     }
 
