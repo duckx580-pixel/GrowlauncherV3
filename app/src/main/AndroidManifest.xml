@@ -15,14 +15,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BILLING" />
     <uses-permission android:name="com.android.vending.BILLING" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- Required for AccountManager to read stored Google accounts (Google Sign-In) -->
     <uses-permission android:name="android.permission.GET_ACCOUNTS" />
 
-    <!-- Required on Android 11+ to query the official Growtopia APK for game assets -->
     <queries>
         <package android:name="com.rtsoft.growtopia" />
         <package android:name="com.google.android.webview" />
@@ -70,7 +69,6 @@
             android:hardwareAccelerated="true"
             android:theme="@style/Theme.Growlauncher" />
 
-        <!-- Settings screen -->
         <activity
             android:name=".SettingsActivity"
             android:exported="false"
@@ -94,6 +92,15 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="grow" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="login.growtopiagame.com"
+                    android:pathPrefix="/google" />
             </intent-filter>
         </activity>
 
@@ -170,7 +177,6 @@
             android:name="com.google.android.gms.version"
             android:value="@integer/google_play_services_version" />
 
-        <!-- Firebase Cloud Messaging service (stub – receives engine push callbacks) -->
         <service
             android:name="com.rtsoft.growtopia.MyFirebaseMessagingService"
             android:exported="false">
