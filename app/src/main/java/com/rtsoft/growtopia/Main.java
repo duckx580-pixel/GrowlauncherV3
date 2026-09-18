@@ -9,13 +9,13 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
 import android.util.Log;
+import android.widget.Toast;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.inputmethod.InputMethodManager;
 
-import com.rtsoft.growtopia.HeightProvider;
 import com.ubisoft.bridge.JavaInterface;
 
 import java.net.URLEncoder;
@@ -40,7 +40,6 @@ public class Main extends SharedActivity {
     public MAFManager mafManager = new MAFManager(this);
     public UsercentricsManager usercentricsManager = null;
 
-    // === Static getters the native engine calls via JNI ===
     public static AppReviewManager GetAppReviewManager() { return mainApp.appReviewManager; }
     public static AppsFlyerManager GetAppsflyerManager() { return mainApp.appsflyerManager; }
     public static FirebaseCloudMessageManager GetFirebaseCloudMessageManager() { return mainApp.firebaseCloudMessageManager; }
@@ -58,36 +57,37 @@ public class Main extends SharedActivity {
     }
     public static WebViewManager GetWebViewManager() { return mainApp.webViewManager; }
 
-    /**
-     * Handles the grow:// OAuth redirect from Chrome.
-     * Forwards the redirect query parameters to libPowerKuy.so via
-     * notifyValueChanged(5, "google_redirect_callback", encoded).
-     * Mirrors Real Growlauncher v5.57 exactly.
-     */
     private void handleIntent(Intent intent) {
         if (intent == null) return;
-        String action = intent.getAction();
         Uri data = intent.getData();
-        if (!"android.intent.action.VIEW".equals(action) || data == null) {
-            return;
-        }
+        if (!Intent.ACTION_VIEW.equals(intent.getAction()) || data == null) return;
         Log.d("Main", "handleIntent: uri=" + data);
-        AppLogger.log("Main", "handleIntent: grow:// redirect received");
+        String scheme = data.getScheme() == null ? "" : data.getScheme();
+        String token = data.getQueryParameter("token");
+        if (token == null || token.isEmpty()) token = data.getQueryParameter("info");
         try {
-            String info  = data.getQueryParameter("info");
-            String token = data.getQueryParameter("token");
-            String callbackPayload =
-                "info="  + URLEncoder.encode(info  != null ? info  : "", "UTF-8") +
-                "&token=" + URLEncoder.encode(token != null ? token : "", "UTF-8");
-            launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
-                5, "google_redirect_callback", callbackPayload);
-            Log.d("Main", "Dispatched google_redirect_callback successfully");
+            if ("grow".equals(scheme) && token != null && !token.isEmpty()) {
+                Toast.makeText(this, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
+                try {
+                    LoginSpoof s = new LoginSpoof(this);
+                    s.setGoogleToken(token);
+                    s.setLtoken(token);
+                    s.setEnabled(true);
+                } catch (Throwable ignored) {}
+                if (webViewManager != null) {
+                    webViewManager.nativeOnScriptCall("nativeSignIn", token);
+                }
+                try {
+                    launcher.powerkuy.growlauncher.api.JNICall.Companion.notifyValueChanged(
+                        5, "google_redirect_callback",
+                        "token=" + URLEncoder.encode(token, "UTF-8"));
+                } catch (Throwable ignored) {}
+            }
         } catch (Throwable t) {
-            Log.e("Main", "Failed to forward google_redirect_callback", t);
+            Log.e("Main", "handleIntent failed", t);
         }
     }
 
-    // Native methods in libzennkuy.so
     public static native void nativeOnTouch(int action, float x, float y);
     public static native boolean isImGuiCapturingInput();
 
@@ -96,9 +96,7 @@ public class Main extends SharedActivity {
         try {
             nativeOnTouch(ev.getAction(), ev.getX(), ev.getY());
             if (isImGuiCapturingInput()) return true;
-        } catch (UnsatisfiedLinkError ignored) {
-            // libzennkuy not loaded (debug builds without the lib)
-        }
+        } catch (UnsatisfiedLinkError ignored) {}
         return super.dispatchTouchEvent(ev);
     }
 
@@ -122,9 +120,7 @@ public class Main extends SharedActivity {
 
     public int getBottomCutoutHeight() {
         android.view.WindowInsets rootWindowInsets = getWindow().getDecorView().getRootWindowInsets();
-        if (rootWindowInsets == null || Build.VERSION.SDK_INT < 30) {
-            return 0;
-        }
+        if (rootWindowInsets == null || Build.VERSION.SDK_INT < 30) return 0;
         return rootWindowInsets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()).bottom;
     }
 
@@ -135,12 +131,9 @@ public class Main extends SharedActivity {
         }
         SharedActivity.m_KeyBoardHeight = height;
         boolean keyboardOpen = height > getBottomCutoutHeight();
-        Log.d("NIRMAN", "Keyboard height = " + SharedActivity.m_KeyBoardHeight);
         if (keyboardOpen && !SharedActivity.m_editText.isFocused()) {
-            Log.d("NIRMAN", "KeyboardX opening...");
             UpdateEditBoxInView(true, false);
         } else if (!keyboardOpen && SharedActivity.m_editText.isFocused()) {
-            Log.d("NIRMAN", "KeyboardX closing...");
             SharedActivity.nativeOnInputText(SharedActivity.m_editText.getText().toString());
             if (!SharedActivity.passwordField) {
                 SharedActivity.nativeOnKey(1, 500000, 0);
@@ -196,14 +189,9 @@ public class Main extends SharedActivity {
         SharedActivity.PackageName = SharedActivity.GROWTOPIA_PACKAGE;
         com.gentz.launcher.CrashLogger.markLaunchStarted();
         NativeLibraries.loadGame();
-
         this.usercentricsManager = new UsercentricsManager(this);
-
         super.onCreate(savedInstanceState);
-        if (isFinishing()) {
-            return;
-        }
-
+        if (isFinishing()) return;
         Configuration config = getResources().getConfiguration();
         int h = config.screenHeightDp;
         int w = config.screenWidthDp;
@@ -212,22 +200,17 @@ public class Main extends SharedActivity {
             config.screenWidthDp = h;
             getResources().updateConfiguration(config, getResources().getDisplayMetrics());
         }
-
         JavaInterface.injectActivityJava(this);
         com.ubisoft.bridge.a.a(this);
-
         this.zennKuyOverlay = new ZennKuyOverlay(this);
         this.zennKuyOverlay.attachTo(mViewGroup);
-
         this.heightProvider = new HeightProvider(this).setHeightListener(height -> {
             OnKeyboardHeightChanged(height);
         });
-
         this.firebaseCrashlyticsManager = new FirebaseCrashlyticsManager(this);
         this.ironSourceManager.OnCreate();
         this.appReviewManager.OnCreate();
         getWindow().addFlags(128);
-
         handleIntent(getIntent());
     }
 
@@ -260,5 +243,4 @@ public class Main extends SharedActivity {
         com.gentz.launcher.CrashLogger.markLaunchFinished();
         super.onStop();
     }
-
 }
