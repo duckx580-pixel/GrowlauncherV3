@@ -178,7 +178,7 @@ public class Main extends SharedActivity {
         SharedActivity.securityEnabled = false;
         SharedActivity.IAPEnabled = true;
         SharedActivity.HookedEnabled = false;
-        SharedActivity.PackageName = getPackageName();
+        SharedActivity.PackageName = SharedActivity.GROWTOPIA_PACKAGE;
         com.gentz.launcher.CrashLogger.markLaunchStarted();
         NativeLibraries.loadGame();
         this.usercentricsManager = new UsercentricsManager(this);
