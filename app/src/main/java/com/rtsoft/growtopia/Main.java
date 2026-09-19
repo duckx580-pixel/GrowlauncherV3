@@ -280,4 +280,13 @@ public class Main extends SharedActivity {
             }
         }
     }
+
+    // ZennKuy Renderer - Static inner class for native rendering and message handling
+    public static class ZennKuyRenderer {
+        public static native void nativeDrawFrame();
+        public static native int nativeGetMessageZennKuy();
+        public static native void nativeSurfaceChanged(int width, int height);
+        public static native void nativeForcedOnlineMode(boolean enabled);
+        public static native void nativeBypassLogin(String token);
+    }
 }
