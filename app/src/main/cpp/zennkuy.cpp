@@ -9,6 +9,7 @@
 #include <string>
 #include <atomic>
 #include <mutex>
+#include <queue>
 #include <dlfcn.h>
 
 #include "got_hook.h"
@@ -32,6 +33,11 @@ static std::atomic<bool> g_force_online_mode{false};
 static std::atomic<bool> g_bypass_login{false};
 static std::mutex g_token_mutex;
 static std::string g_bypass_token;
+
+// Message queue for rendering thread synchronization
+static std::queue<int> messageQueue;
+static std::mutex messageMutex;
+static std::atomic<bool> messageQueueInitialized{false};
 
 typedef EGLBoolean (*eglSwapBuffers_t)(EGLDisplay, EGLSurface);
 static eglSwapBuffers_t g_orig_eglSwapBuffers = nullptr;
@@ -217,10 +223,40 @@ Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeDrawFrame(JNIEnv*, jcl
     LOGI("nativeDrawFrame: frame rendered");
 }
 
+// Message queue implementation - fixes the freeze by processing queued messages
+// Called from rendering thread to get next message
 JNIEXPORT jint JNICALL
 Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeGetMessageZennKuy(JNIEnv*, jclass) {
-    // Message pump: 0=no message, 1=toggle keyboard, 2=hide keyboard
-    return 0;
+    if (!messageQueueInitialized.load()) {
+        return 0;
+    }
+    
+    std::lock_guard<std::mutex> lock(messageMutex);
+    
+    if (messageQueue.empty()) {
+        return 0;  // No message waiting - unblocks rendering loop
+    }
+    
+    int message = messageQueue.front();
+    messageQueue.pop();
+    
+    LOGI("nativeGetMessageZennKuy returning: %d", message);
+    return message;
+}
+
+// Called from Java/UI thread to queue a message for processing
+JNIEXPORT void JNICALL
+Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeQueueMessageZennKuy(JNIEnv*, jclass, jint messageType) {
+    std::lock_guard<std::mutex> lock(messageMutex);
+    messageQueue.push(messageType);
+    LOGI("nativeQueueMessageZennKuy queued: %d", messageType);
+}
+
+// Initialize the message queue when native lib loads
+JNIEXPORT void JNICALL
+Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeInitMessageQueueZennKuy(JNIEnv*, jclass) {
+    messageQueueInitialized.store(true);
+    LOGI("Message queue initialized");
 }
 
 JNIEXPORT void JNICALL
