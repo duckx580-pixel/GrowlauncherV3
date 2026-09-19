@@ -1,0 +1,49 @@
+<rml>
+    <head>
+        <title>StartScreen</title>
+        <link type="text/rcss" href="StartScreen.rcss" />
+        <link type="text/template" href="BaseTemplate.rml" />
+        <script lang="text/lua">
+        function onShow(document)
+            document:GetElementById('kuy-btn-panels'):SetClass("display", true)
+            document:GetElementById('version-text'):SetClass("display", true);
+            document:GetElementById('login-panel'):SetClass("display", true);
+            document:GetElementById('logo'):SetClass("display", true);
+        end
+        </script>
+    </head>
+
+    <body template="BaseTemplate" class="start-screen" onshow="onShow(document)" data-model="AppContext">
+        <div id="backGround">
+          <div class="background-img" />
+        </div>
+        <div id="logo">
+            <div class="logo-img" />
+        </div>
+        <div id="kuy-btn-panels">
+            <label onclick="OnEvent(element, 'on-start-game')" class="scale-anim">Play Online</label>
+            <label onclick="OnEvent(element, 'on-options')")>Options</label>
+            <label onclick="OnEvent(element, 'on-about')"">Settings</label>
+        </div>
+        <div id="login-panel" data-visible="AppContext.IsLoggedIn">
+            <div>
+                <div class="font-body1 start-screen-shadow-text">Logged in as:</div>
+                <div class="player-name">
+                    <div data-attr-class="'icon-img account-icon-' + AppContext.GetAccountType" />
+                    <span class="color_green font-body1 start-screen-shadow-text">{{AppContext.GetPlayerName}}</span>
+                </div>
+                <div class="button button-yellow-color" onclick="OnEvent(event, 'on-logout')">
+                    <span class="label" data-style-display="AppContext.IsUseUbiconnect?'block':'none'" data-rml="AppContext.GetAccountType == 'ubiconnect' ? 'Link' : 'Unlink'"></span>
+                    <span class="label" data-style-display="!AppContext.IsUseUbiconnect?'block':'none'">Logout</span>
+                </div>
+            </div>
+        </div>
+        <div id="changelogs">
+            <div class="card">
+               <div class="card-icon">Growtopia Roleplay</div>
+               <h2 class="card-title">Medival Theme</h2>
+            </div>
+        </div>
+        <div id="version-text" class="font-body1 start-screen-shadow-text"><span>{{AppContext.GetVersionString}}</span></div>
+    </body>
+</rml>
