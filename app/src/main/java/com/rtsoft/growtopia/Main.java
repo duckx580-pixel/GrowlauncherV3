@@ -18,6 +18,9 @@ import com.ubisoft.bridge.JavaInterface;
 
 import java.io.File;
 import java.net.URLEncoder;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import android.view.MotionEvent;
 
 public class Main extends SharedActivity {
     public static boolean OriginalKeyboard = false;
@@ -27,24 +30,21 @@ public class Main extends SharedActivity {
     public static GLSurfaceView mygl;
     private HeightProvider heightProvider;
 
-    // ✅ Load ZennKuy native library (custom implementation)
-    static {
-        try {
-            System.loadLibrary("ZennKuy");
-            Log.d("ZennKuy", "libzennkuy.so loaded successfully");
-        } catch (UnsatisfiedLinkError e) {
-            Log.w("ZennKuy", "Failed to load libzennkuy.so: " + e.getMessage());
+    // Touch event processing on background thread to prevent GL thread blocking
+    private static class TouchEvent {
+        final int action;
+        final float x;
+        final float y;
+
+        TouchEvent(int action, float x, float y) {
+            this.action = action;
+            this.x = x;
+            this.y = y;
         }
     }
 
-    // ✅ ZennKuy Renderer class - matches your libzennkuy.so native methods
-    public static class ZennKuyRenderer {
-        public static native void nativeDrawFrame();
-        public static native int nativeGetMessageZennKuy();
-        public static native void nativeSurfaceChanged(int width, int height);
-        public static native void nativeForcedOnlineMode(boolean force);
-        public static native void nativeBypassLogin(String token);
-    }
+    private BlockingQueue<TouchEvent> touchEventQueue = new LinkedBlockingQueue<>();
+    private Thread touchProcessorThread;
 
     public NativeAppInterface nativeAppInterface = new NativeAppInterface();
     public AppsFlyerManager appsflyerManager = new AppsFlyerManager(this);
@@ -131,9 +131,11 @@ public class Main extends SharedActivity {
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         try {
-            nativeOnTouch(ev.getAction(), ev.getX(), ev.getY());
+            // Queue the touch event to be processed on background thread
+            // This prevents blocking the GL rendering thread with socket operations
+            touchEventQueue.offer(new TouchEvent(ev.getAction(), ev.getX(), ev.getY()));
             if (isImGuiCapturingInput()) return true;
-        } catch (UnsatisfiedLinkError ignored) {}
+        } catch (Exception ignored) {}
         return super.dispatchTouchEvent(ev);
     }
 
@@ -208,15 +210,13 @@ public class Main extends SharedActivity {
         this.zennKuyOverlay = new ZennKuyOverlay(this);
         this.zennKuyOverlay.attachTo(mViewGroup);
         this.heightProvider = new HeightProvider(this).setHeightListener(this::OnKeyboardHeightChanged);
+        // Start background thread for touch event processing to prevent GL thread blocking
+        startTouchProcessorThread();
         this.firebaseCrashlyticsManager = new FirebaseCrashlyticsManager(this);
         this.ironSourceManager.OnCreate();
         this.appReviewManager.OnCreate();
         getWindow().addFlags(128);
         logSavePath();
-        
-        // ✅ Initialize ZennKuy for forcing OnlineGameController and bypassing login
-        ZennKuyInjector.initializeZennKuy();
-        
         handleIntent(getIntent());
     }
 
@@ -247,6 +247,37 @@ public class Main extends SharedActivity {
     @Override
     public void onStop() {
         com.gentz.launcher.CrashLogger.markLaunchFinished();
+        stopTouchProcessorThread();
         super.onStop();
+    }
+
+    private void startTouchProcessorThread() {
+        if (touchProcessorThread == null || !touchProcessorThread.isAlive()) {
+            touchProcessorThread = new Thread(() -> {
+                while (!Thread.currentThread().isInterrupted()) {
+                    try {
+                        TouchEvent event = touchEventQueue.take(); // Blocks until event available
+                        try {
+                            nativeOnTouch(event.action, event.x, event.y);
+                        } catch (UnsatisfiedLinkError ignored) {}
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }, "TouchEventProcessor");
+            touchProcessorThread.start();
+        }
+    }
+
+    private void stopTouchProcessorThread() {
+        if (touchProcessorThread != null) {
+            touchProcessorThread.interrupt();
+            try {
+                touchProcessorThread.join(1000); // Wait up to 1 second for thread to finish
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 }
