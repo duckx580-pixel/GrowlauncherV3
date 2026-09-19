@@ -51,8 +51,7 @@ android {
     sourceSets {
         getByName("main") {
             jniLibs.srcDirs("src/main/jniLibs")
-            // Slim launcher bundle; Growtopia game data is read from the installed game.
-            assets.setSrcDirs(listOf("src/main/assets_v557_slim"))
+            assets.setSrcDirs(listOf("src/main/assets"))
         }
     }
 
