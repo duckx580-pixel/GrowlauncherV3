@@ -61,26 +61,20 @@ public class UsercentricsManager {
         }
     }
 
-    private void scheduleDeliveries() {
-        long[] delays = new long[] { 0L, 200L, 800L, 2000L };
-        for (long d : delays) {
-            uiHandler.postDelayed(() -> {
-                Log.d(TAG, "deliverAccepted delayMs=" + d);
-                deliverAccepted();
-            }, d);
-        }
-    }
-
     public void InitWithRuleSet(String str) {
         Log.d(TAG, "InitWithRuleSet ruleSetId=" + str);
-        consentDelivered = false;
-        scheduleDeliveries();
+        if (!consentDelivered) {
+            consentDelivered = true;
+            uiHandler.post(this::deliverAccepted);
+        }
     }
 
     public void InitWithSettings(String str) {
         Log.d(TAG, "InitWithSettings settingsId=" + str);
-        consentDelivered = false;
-        scheduleDeliveries();
+        if (!consentDelivered) {
+            consentDelivered = true;
+            uiHandler.post(this::deliverAccepted);
+        }
     }
 
     public void CheckConsentState() {
