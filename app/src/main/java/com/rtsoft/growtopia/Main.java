@@ -27,6 +27,25 @@ public class Main extends SharedActivity {
     public static GLSurfaceView mygl;
     private HeightProvider heightProvider;
 
+    // ✅ Load ZennKuy native library (custom implementation)
+    static {
+        try {
+            System.loadLibrary("ZennKuy");
+            Log.d("ZennKuy", "libzennkuy.so loaded successfully");
+        } catch (UnsatisfiedLinkError e) {
+            Log.w("ZennKuy", "Failed to load libzennkuy.so: " + e.getMessage());
+        }
+    }
+
+    // ✅ ZennKuy Renderer class - matches your libzennkuy.so native methods
+    public static class ZennKuyRenderer {
+        public static native void nativeDrawFrame();
+        public static native int nativeGetMessageZennKuy();
+        public static native void nativeSurfaceChanged(int width, int height);
+        public static native void nativeForcedOnlineMode(boolean force);
+        public static native void nativeBypassLogin(String token);
+    }
+
     public NativeAppInterface nativeAppInterface = new NativeAppInterface();
     public AppsFlyerManager appsflyerManager = new AppsFlyerManager(this);
     public IronSourceManager ironSourceManager = new IronSourceManager(this);
@@ -194,6 +213,10 @@ public class Main extends SharedActivity {
         this.appReviewManager.OnCreate();
         getWindow().addFlags(128);
         logSavePath();
+        
+        // ✅ Initialize ZennKuy for forcing OnlineGameController and bypassing login
+        ZennKuyInjector.initializeZennKuy();
+        
         handleIntent(getIntent());
     }
 

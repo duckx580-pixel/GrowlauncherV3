@@ -6,6 +6,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.Surface;
+import android.view.inputmethod.InputMethodManager;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -104,6 +105,30 @@ public class AppRenderer implements GLSurfaceView.Renderer {
                     && NativeLibraries.isGameLoaded()) {
                 nativeUpdate();
                 nativeRender();
+                
+                // ✅ CRITICAL: Call ZennKuy's native renderer every frame
+                try {
+                    Main.ZennKuyRenderer.nativeDrawFrame();
+                } catch (UnsatisfiedLinkError e) {
+                    Log.w("ZennKuy", "nativeDrawFrame failed: " + e.getMessage());
+                }
+            }
+            
+            // ✅ CRITICAL: Poll ZennKuy for messages (keyboard, etc)
+            int iNativeGetMessageZennKuy = 0;
+            try {
+                iNativeGetMessageZennKuy = Main.ZennKuyRenderer.nativeGetMessageZennKuy();
+            } catch (UnsatisfiedLinkError e) {
+                Log.w("ZennKuy", "nativeGetMessageZennKuy failed: " + e.getMessage());
+            }
+            
+            if (iNativeGetMessageZennKuy != 0) {
+                InputMethodManager imm = (InputMethodManager) SharedActivity.app.getSystemService("input_method");
+                if (iNativeGetMessageZennKuy == 1) {
+                    imm.toggleSoftInput(2, 0);
+                } else if (iNativeGetMessageZennKuy == 2) {
+                    imm.hideSoftInputFromWindow(SharedActivity.mGLView.getWindowToken(), 0);
+                }
             }
 
             // Proton OS message pump
@@ -172,6 +197,14 @@ public class AppRenderer implements GLSurfaceView.Renderer {
         this.width = w;
         this.height = h;
         nativeSetWindow(SharedActivity.mGLView.getHolder().getSurface());
+        
+        // ✅ CRITICAL: Notify ZennKuy about surface dimension changes
+        try {
+            Main.ZennKuyRenderer.nativeSurfaceChanged(w, h);
+            Log.d(SharedActivity.PackageName, "ZennKuy surface changed: " + w + "x" + h);
+        } catch (UnsatisfiedLinkError e) {
+            Log.w(SharedActivity.PackageName, "ZennKuy nativeSurfaceChanged failed: " + e.getMessage());
+        }
     }
 
     @Override
