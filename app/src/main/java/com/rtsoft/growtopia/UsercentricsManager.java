@@ -24,7 +24,6 @@ public class UsercentricsManager {
         this.baseContext = activity;
     }
 
-    // Native callbacks — called from the UI thread (matches real 5.55 implementation)
     public native void InitFinish(boolean success);
     public native void OnConsentFetchedFail(int code, String message);
     public native void OnConsentFetchedSuccess(List<UsercentricsServiceConsent> list);
@@ -36,71 +35,69 @@ public class UsercentricsManager {
         history.add(historyEntry);
 
         UsercentricsServiceConsent consent = new UsercentricsServiceConsent(
-                "growtopia",   // templateId
-                true,          // status = accepted
+                "growtopia",
+                true,
                 history,
                 UsercentricsConsentType.EXPLICIT,
-                "Ubisoft",     // dataProcessor
-                "1.0",         // version
-                true,          // isEssential
-                "Essential"    // category
+                "Ubisoft",
+                "1.0",
+                true,
+                "Essential"
         );
         return Collections.singletonList(consent);
     }
 
-    public void InitWithRuleSet(String str) {
-        Log.d(TAG, "InitWithRuleSet called, ruleSetId=" + str);
-        uiHandler.post(() -> {
-            Log.d(TAG, "InitWithRuleSet -> calling InitFinish(true)");
-            try { InitFinish(true); } catch (UnsatisfiedLinkError e) {
-                Log.w(TAG, "InitFinish unavailable: " + e.getMessage());
-            }
-        });
-    }
-
-    public void InitWithSettings(String str) {
-        Log.d(TAG, "InitWithSettings called, settingsId=" + str);
-        uiHandler.post(() -> {
-            Log.d(TAG, "InitWithSettings -> calling InitFinish(true)");
-            try { InitFinish(true); } catch (UnsatisfiedLinkError e) {
-                Log.w(TAG, "InitFinish unavailable: " + e.getMessage());
-            }
-        });
-    }
-
-    public void CheckConsentState() {
-        Log.d(TAG, "CheckConsentState called");
-        if (consentDelivered) {
-            Log.d(TAG, "CheckConsentState: consent already delivered, skipping duplicate call");
-            return;
-        }
-        consentDelivered = true;
+    private void deliverAccepted() {
         List<UsercentricsServiceConsent> consents = buildAcceptedConsentList();
-        uiHandler.post(() -> {
-            Log.d(TAG, "CheckConsentState -> calling OnConsentFetchedSuccess");
-            try { OnConsentFetchedSuccess(consents); } catch (UnsatisfiedLinkError e) {
-                Log.w(TAG, "OnConsentFetchedSuccess unavailable: " + e.getMessage());
-            }
-        });
-    }
-
-    public void FetchUserConsent(List<UsercentricsServiceConsent> list) {
-        Log.d(TAG, "FetchUserConsent called, list=" + (list == null ? "null" : "size=" + list.size()));
-        List<UsercentricsServiceConsent> consents =
-                (list != null && !list.isEmpty()) ? list : buildAcceptedConsentList();
-        Log.d(TAG, "FetchUserConsent -> calling OnConsentFetchedSuccess with " + consents.size() + " entries");
-        try { OnConsentFetchedSuccess(consents); } catch (UnsatisfiedLinkError e) {
+        try {
+            InitFinish(true);
+        } catch (UnsatisfiedLinkError e) {
+            Log.w(TAG, "InitFinish unavailable: " + e.getMessage());
+        }
+        try {
+            OnConsentFetchedSuccess(consents);
+        } catch (UnsatisfiedLinkError e) {
             Log.w(TAG, "OnConsentFetchedSuccess unavailable: " + e.getMessage());
         }
     }
 
+    private void scheduleDeliveries() {
+        long[] delays = new long[] { 0L, 200L, 800L, 2000L };
+        for (long d : delays) {
+            uiHandler.postDelayed(() -> {
+                Log.d(TAG, "deliverAccepted delayMs=" + d);
+                deliverAccepted();
+            }, d);
+        }
+    }
+
+    public void InitWithRuleSet(String str) {
+        Log.d(TAG, "InitWithRuleSet ruleSetId=" + str);
+        consentDelivered = false;
+        scheduleDeliveries();
+    }
+
+    public void InitWithSettings(String str) {
+        Log.d(TAG, "InitWithSettings settingsId=" + str);
+        consentDelivered = false;
+        scheduleDeliveries();
+    }
+
+    public void CheckConsentState() {
+        Log.d(TAG, "CheckConsentState");
+        consentDelivered = true;
+        uiHandler.post(this::deliverAccepted);
+    }
+
+    public void FetchUserConsent(List<UsercentricsServiceConsent> list) {
+        uiHandler.post(this::deliverAccepted);
+    }
+
     public void RequestConsentSettings() {
-        Log.d(TAG, "RequestConsentSettings called -> delegating to CheckConsentState");
         CheckConsentState();
     }
 
     public void ShowConsentSettings() {
-        Log.d(TAG, "ShowConsentSettings called -> delegating to CheckConsentState");
         CheckConsentState();
     }
 }
