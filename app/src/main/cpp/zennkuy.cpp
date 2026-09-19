@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <string>
 #include <atomic>
+#include <mutex>
 #include <dlfcn.h>
 
 #include "got_hook.h"
@@ -25,6 +26,12 @@ static JavaVM* g_jvm = nullptr;
 static jobject g_bridge_class = nullptr;
 static std::atomic<bool> g_imgui_ready{false};
 static std::atomic<bool> g_menu_open{false};
+
+// ZennKuy native state
+static std::atomic<bool> g_force_online_mode{false};
+static std::atomic<bool> g_bypass_login{false};
+static std::mutex g_token_mutex;
+static std::string g_bypass_token;
 
 typedef EGLBoolean (*eglSwapBuffers_t)(EGLDisplay, EGLSurface);
 static eglSwapBuffers_t g_orig_eglSwapBuffers = nullptr;
@@ -84,7 +91,7 @@ static void render_menu() {
     ImGui::Begin("ZennKuy", nullptr,
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse);
 
-    const char* tabs[] = { "Google Login", "Info" };
+    const char* tabs[] = { "Google Login", "Status" };
     ImGui::BeginTabBar("##tabs");
     for (int i = 0; i < 2; i++) {
         if (ImGui::BeginTabItem(tabs[i])) { g_tab = i; ImGui::EndTabItem(); }
@@ -102,8 +109,26 @@ static void render_menu() {
             call_bridge("startResolving");
         }
     } else {
-        ImGui::Text("ZennKuy");
-        ImGui::TextWrapped("Spoof fields were removed from this menu. Use launcher Settings.");
+        ImGui::Text("ZennKuy Status");
+        ImGui::Separator();
+        
+        // Status indicators
+        ImVec4 active_color = ImVec4(0.2f, 1.0f, 0.2f, 1.0f);
+        ImVec4 inactive_color = ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
+        
+        if (g_force_online_mode) {
+            ImGui::TextColored(active_color, "● Force Online Mode: ACTIVE");
+        } else {
+            ImGui::TextColored(inactive_color, "● Force Online Mode: INACTIVE");
+        }
+        
+        if (g_bypass_login) {
+            ImGui::TextColored(active_color, "● Login Bypass: ACTIVE");
+        } else {
+            ImGui::TextColored(inactive_color, "● Login Bypass: INACTIVE");
+        }
+        
+        ImGui::TextWrapped("OnlineGameController initialized and ready.");
     }
     ImGui::End();
 }
@@ -128,6 +153,7 @@ static EGLBoolean my_eglSwapBuffers(EGLDisplay display, EGLSurface surface) {
 
 extern "C" {
 
+// Original touch handler
 JNIEXPORT void JNICALL
 Java_com_rtsoft_growtopia_Main_nativeOnTouch(JNIEnv*, jclass,
     jint action, jfloat x, jfloat y)
@@ -151,11 +177,90 @@ Java_com_rtsoft_growtopia_Main_nativeOnTouch(JNIEnv*, jclass,
     }
 }
 
+// New ZennKuyRenderer touch handler (called from AppRenderer)
+JNIEXPORT jboolean JNICALL
+Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeOnTouch(JNIEnv*, jclass,
+    jint x, jint y, jint action)
+{
+    if (!g_imgui_ready) return JNI_FALSE;
+    ImGuiIO& io = ImGui::GetIO();
+    switch (action) {
+        case 0: // ACTION_DOWN
+            io.AddMousePosEvent(x, y);
+            io.AddMouseButtonEvent(0, true);
+            LOGI("nativeOnTouch: DOWN at (%d, %d)", x, y);
+            break;
+        case 1: // ACTION_UP
+            io.AddMouseButtonEvent(0, false);
+            LOGI("nativeOnTouch: UP at (%d, %d)", x, y);
+            break;
+        case 2: // ACTION_MOVE
+            io.AddMousePosEvent(x, y);
+            LOGI("nativeOnTouch: MOVE at (%d, %d)", x, y);
+            break;
+    }
+    return io.WantCaptureMouse ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_rtsoft_growtopia_Main_isImGuiCapturingInput(JNIEnv*, jclass)
 {
     if (!g_imgui_ready) return JNI_FALSE;
     return ImGui::GetIO().WantCaptureMouse ? JNI_TRUE : JNI_FALSE;
+}
+
+// ZennKuyRenderer native methods - Critical for GL synchronization and auth bypass
+
+JNIEXPORT void JNICALL
+Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeDrawFrame(JNIEnv*, jclass) {
+    // Called every frame from AppRenderer to synchronize GL thread
+    LOGI("nativeDrawFrame: frame rendered");
+}
+
+JNIEXPORT jint JNICALL
+Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeGetMessageZennKuy(JNIEnv*, jclass) {
+    // Message pump: 0=no message, 1=toggle keyboard, 2=hide keyboard
+    return 0;
+}
+
+JNIEXPORT void JNICALL
+Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeSurfaceChanged(JNIEnv*, jclass, jint width, jint height) {
+    LOGI("nativeSurfaceChanged: %dx%d", width, height);
+    glViewport(0, 0, width, height);
+}
+
+JNIEXPORT void JNICALL
+Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeForcedOnlineMode(JNIEnv*, jclass, jboolean force) {
+    g_force_online_mode = (force == JNI_TRUE);
+    LOGI("nativeForcedOnlineMode: %s", force ? "TRUE" : "FALSE");
+}
+
+JNIEXPORT void JNICALL
+Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeBypassLogin(JNIEnv* env, jclass, jstring token_str) {
+    const char* token = env->GetStringUTFChars(token_str, nullptr);
+    if (token) {
+        std::lock_guard<std::mutex> lock(g_token_mutex);
+        g_bypass_token = token;
+        g_bypass_login = true;
+        LOGI("nativeBypassLogin: Token received (length: %zu), Login bypass activated", std::strlen(token));
+        env->ReleaseStringUTFChars(token_str, token);
+    }
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeGetBypassLoginStatus(JNIEnv*, jclass) {
+    return g_bypass_login ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeGetForceOnlineModeStatus(JNIEnv*, jclass) {
+    return g_force_online_mode ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_rtsoft_growtopia_Main_00024ZennKuyRenderer_nativeGetBypassToken(JNIEnv* env, jclass) {
+    std::lock_guard<std::mutex> lock(g_token_mutex);
+    return env->NewStringUTF(g_bypass_token.c_str());
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
