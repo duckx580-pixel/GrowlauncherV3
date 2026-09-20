@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.rtsoft.growtopia">
+    package="com.gentz.launcher">
 
     <uses-feature android:glEsVersion="0x20000" android:required="true" />
 
@@ -38,7 +38,7 @@
     </queries>
 
     <application
-        android:name="com.rtsoft.growtopia.App"
+        android:name="com.gentz.launcher.App"
         android:allowBackup="true"
         android:extractNativeLibs="true"
         android:isGame="true"
