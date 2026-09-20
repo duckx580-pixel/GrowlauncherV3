@@ -9,7 +9,7 @@ android {
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
-        applicationId = "com.rtsoft.growtopia"
+        applicationId = "com.gentz.launcher"
         minSdk = 24
         targetSdk = 35
         versionCode = 55700
