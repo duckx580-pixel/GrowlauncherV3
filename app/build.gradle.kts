@@ -77,3 +77,9 @@ dependencies {
     implementation("com.google.android.gms:play-services-ads-identifier:18.0.1")
     implementation("com.usercentrics.sdk:usercentrics:2.9.0")
 }
+
+configurations.all {
+    resolutionStrategy {
+        force("com.usercentrics.sdk:usercentrics:2.9.0")
+    }
+}
