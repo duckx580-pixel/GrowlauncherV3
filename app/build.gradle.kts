@@ -75,5 +75,5 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:20.7.0")
     implementation("com.google.android.gms:play-services-base:18.3.0")
     implementation("com.google.android.gms:play-services-ads-identifier:18.0.1")
-    implementation("com.usercentrics.sdk:usercentrics:2.6.0")
+    implementation("com.usercentrics.sdk:usercentrics:2.9.0")
 }
