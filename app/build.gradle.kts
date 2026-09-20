@@ -4,12 +4,12 @@ plugins {
 }
 
 android {
-    namespace = "com.gentz.launcher"
+    namespace = "com.rtsoft.growtopia"
     compileSdk = 35
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
-        applicationId = "com.gentz.launcher"
+        applicationId = "com.rtsoft.growtopia"
         minSdk = 24
         targetSdk = 35
         versionCode = 55700
